@@ -29,10 +29,8 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Cursor：忽略本地规则等，但保留仓库内引导与设计笔记（.cursor/skills/）
-.cursor/*
-!.cursor/skills/
-!.cursor/skills/**
+# Cursor（IDE 本地配置与 skills，不入库）
+.cursor/
 
 # Example 生成物（prelude / filelist 输出）
 example/generated/
