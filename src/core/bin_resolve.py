@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import shutil
 import sys
 from pathlib import Path
 
 
 class ToolBinaryLocator:
-    """在本地 tools/bin 与 PATH 中定位 rg、fd。"""
+    """仅在仓库 `tools/bin` 下定位 rg、fd（不读 PATH；仓库根由本包相对路径推断）。"""
 
-    def __init__(self, repo_root: Path | None = None) -> None:
-        self._root = repo_root or self._infer_repo_root()
+    def __init__(self) -> None:
+        self._root = self._infer_repo_root()
 
     @staticmethod
     def _infer_repo_root() -> Path:
@@ -22,26 +21,23 @@ class ToolBinaryLocator:
     def tools_bin(self) -> Path:
         return self._root / "tools" / "bin"
 
-    def resolve_rg(self, override: Path | None) -> str:
-        return self._resolve_one("rg", override, windows_name="rg.exe")
+    def resolve_rg(self) -> str:
+        return self._resolve_one("rg", windows_name="rg.exe")
 
-    def resolve_fd(self, override: Path | None) -> str:
-        return self._resolve_one("fd", override, windows_name="fd.exe")
+    def resolve_fd(self) -> str:
+        return self._resolve_one("fd", windows_name="fd.exe")
 
-    def _resolve_one(self, unix_name: str, override: Path | None, *, windows_name: str) -> str:
-        if override is not None:
-            return str(override.expanduser().resolve())
+    def _resolve_one(self, unix_name: str, *, windows_name: str) -> str:
         names = (windows_name, unix_name) if sys.platform.startswith("win") else (unix_name,)
         bin_dir = self.tools_bin()
         for n in names:
             p = bin_dir / n
             if p.is_file():
                 return str(p.resolve())
-        for n in names:
-            w = shutil.which(n)
-            if w:
-                return w
-        return unix_name
+        raise FileNotFoundError(
+            f"未在 {bin_dir} 找到 {unix_name}（尝试过: {', '.join(names)}）。"
+            f"请在本仓库运行 tools 下的下载脚本，将 rg、fd 安装到 tools/bin。",
+        )
 
 
 def normalize_search_roots(paths: list[Path]) -> list[Path]:

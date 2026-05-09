@@ -1,0 +1,134 @@
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from runtime.context import AppContext
+from runtime.filelist_app import FilelistApplication
+
+
+def test_save_skips_reparse_on_second_run(tmp_path: Path) -> None:
+    src = tmp_path / "rtl"
+    src.mkdir()
+    (src / "leaf.v").write_text("module leaf();\nendmodule\n", encoding="utf-8")
+    (src / "top.v").write_text("module top();\n  leaf u1();\nendmodule\n", encoding="utf-8")
+    db = tmp_path / "parse_cache.db"
+
+    hits = {"top": src / "top.v", "leaf": src / "leaf.v"}
+
+    def run_once() -> None:
+        ctx = AppContext(logger=None, console=None)
+        app = FilelistApplication(
+            search_roots=[src],
+            top_modules=["top"],
+            prelude_paths=[],
+            output_path=tmp_path / "save_run.f",
+            save_path=db,
+            ctx=ctx,
+        )
+        app._tools.find_file = lambda m, *_: hits.get(m)
+        app.run()
+
+    with patch("runtime.filelist_app.extract_dependencies_from_file") as ext:
+
+        def _fake(path: Path, *_a: object, **_k: object) -> tuple[list[str], list[str], list[str]]:
+            if path.name == "top.v":
+                return (["top"], ["leaf"], [])
+            return (["leaf"], [], [])
+
+        ext.side_effect = _fake
+        run_once()
+        first = ext.call_count
+        run_once()
+        second = ext.call_count
+    assert first == 2
+    assert second == 2
+
+
+def test_cli_writes_summary_to_stderr(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    from tools_bin_seed import project_has_tools_bin
+
+    if not project_has_tools_bin(root):
+        pytest.skip("工程 tools/bin 下缺少 rg/fd，请先运行 tools 下载脚本")
+    rtl = root / "example" / "complex_rtl"
+    prelude = root / "example" / "generated" / "run_prelude.f"
+    if not prelude.is_file():
+        subprocess.run(
+            [sys.executable, str(root / "example" / "demo.py")],
+            cwd=root,
+            check=False,
+            capture_output=True,
+        )
+    out = tmp_path / "out.f"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(root / "src"),
+            "--source",
+            str(rtl),
+            "-t",
+            "top_chip",
+            "-p",
+            str(prelude),
+            "-o",
+            str(out),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0
+    assert out.is_file()
+    body = out.read_text(encoding="utf-8")
+    lines = [Path(ln.strip()).as_posix() for ln in body.splitlines() if ln.strip()]
+    assert any(ln.endswith("complex_rtl/top_chip.v") for ln in lines)
+    assert proc.stdout.strip() == ""
+    assert str(out.resolve()) in proc.stderr
+
+
+def test_cli_absolute_path_style(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    from tools_bin_seed import project_has_tools_bin
+
+    if not project_has_tools_bin(root):
+        pytest.skip("工程 tools/bin 下缺少 rg/fd，请先运行 tools 下载脚本")
+    rtl = root / "example" / "complex_rtl"
+    prelude = root / "example" / "generated" / "run_prelude.f"
+    if not prelude.is_file():
+        subprocess.run(
+            [sys.executable, str(root / "example" / "demo.py")],
+            cwd=root,
+            check=False,
+            capture_output=True,
+        )
+    out = tmp_path / "abs.f"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(root / "src"),
+            "--source",
+            str(rtl),
+            "-t",
+            "top_chip",
+            "-p",
+            str(prelude),
+            "-o",
+            str(out),
+            "--path-style",
+            "absolute",
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0
+    lines = [ln.strip() for ln in out.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert lines
+    assert all(Path(ln).is_absolute() for ln in lines)

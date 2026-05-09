@@ -4,12 +4,12 @@
 
 ## 目录约定
 
-执行完成后应存在：
+执行完成后应存在（**运行本工具前须已就位**，程序只从此目录加载，**不回退 PATH**）：
 
 - `tools/bin/rg`（Linux/macOS）或 `tools/bin/rg.exe`（Windows）
 - `tools/bin/fd`（Linux/macOS）或 `tools/bin/fd.exe`（Windows）
 
-程序会优先使用 `tools/bin` 下的可执行文件；若无则回退到 `PATH`。
+缺失时程序启动即抛出 **`FileNotFoundError`**，请先运行下文下载脚本。
 
 ## 官方发布页（自行核对最新版本与校验和）
 

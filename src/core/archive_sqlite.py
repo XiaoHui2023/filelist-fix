@@ -19,7 +19,10 @@ class CachedFileRecord:
 
 
 class FileParseArchive:
-    """SQLite 缓存：按路径记住解析过的模块集合与依赖，用 mtime+size 做失效判断。"""
+    """在指定路径用 SQLite 保存单文件解析产物（定义/引用/include），用 mtime+size 判定是否仍可与当前源文件对齐。
+
+    文件扩展名由调用方决定，常见为 ``.db``。
+    """
 
     def __init__(self, db_path: Path | None) -> None:
         self._path = db_path

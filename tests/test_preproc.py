@@ -1,9 +1,9 @@
 from pathlib import Path
 
 from core.filelist_prelude import load_prelude_files
-from core.vlog_preproc import PreprocDirectiveParser
-from core.vlog_scan import scan_verilog_body
-from core.vlog_squeeze import squeeze_for_dependency_scan
+from verilog_text.preproc import PreprocDirectiveParser
+from verilog_text.scan import scan_verilog_body
+from verilog_text.squeeze import squeeze_for_dependency_scan
 
 
 def test_ifdef_filters_inactive_branch() -> None:

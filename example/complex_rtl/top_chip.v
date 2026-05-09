@@ -21,4 +21,14 @@ module top_chip (
 `include "pieces/cellish_frag.vh"
 `include "hier/wrapper_tail.vh"
 
+  torture_anon u_tanon ();
+  torture_gen u_tgen ();
+  torture_timing u_ttime ();
+  torture_bind_mon u_tbind ();
+  torture_comment_farm u_comments ();
+  nested_pyramid u_nested ();
+  torture_ifdef_zoo u_ifdefz ();
+  torture_primitives_gates u_gates ();
+  torture_hash_params u_thash ();
+
 endmodule

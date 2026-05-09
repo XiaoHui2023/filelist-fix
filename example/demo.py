@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -11,6 +12,19 @@ EXPECTED_TOPO_ORDER = (
     "hier/leaf_mem.v",
     "hier/mid_math.v",
     "hier/mid_memctl.v",
+    "torture/nested/ni_leaf.v",
+    "torture/nested/nested_pyramid.sv",
+    "torture/torture_dep_a.v",
+    "torture/torture_dep_b.v",
+    "torture/torture_anon.v",
+    "torture/torture_param_leaf.v",
+    "torture/torture_bind.sv",
+    "torture/torture_comment_farm.v",
+    "torture/torture_gen.sv",
+    "torture/torture_hash_params.v",
+    "torture/torture_ifdef_zoo.v",
+    "torture/torture_primitives_gates.v",
+    "torture/torture_timing.v",
     "top_chip.v",
 )
 
@@ -41,9 +55,13 @@ def _assert_filelist(rtl: Path, filelist_out: Path) -> None:
         for ln in filelist_out.read_text(encoding="utf-8").splitlines()
         if ln.strip()
     ]
-    expected = [(rtl / rel).resolve() for rel in EXPECTED_TOPO_ORDER]
-    got = [Path(p).resolve() for p in paths]
-    assert got == expected, f"filelist 与黄金序不一致\ngot:\n  {got!r}\nexp:\n  {expected!r}"
+    anchor = filelist_out.resolve().parent
+    expected = [
+        Path(os.path.relpath((rtl / rel).resolve(), anchor)).as_posix()
+        for rel in EXPECTED_TOPO_ORDER
+    ]
+    got = [Path(p).as_posix() for p in paths]
+    assert got == expected, f"filelist order mismatch\ngot:\n  {got!r}\nexp:\n  {expected!r}"
 
 
 def main() -> int:
@@ -68,6 +86,7 @@ def main() -> int:
     cmd = [
         sys.executable,
         str(root / "src"),
+        "--source",
         str(rtl.resolve()),
         "-t",
         "top_chip",
@@ -79,8 +98,8 @@ def main() -> int:
     print("filelist-fix example:", " ".join(cmd))
     subprocess.run(cmd, check=True, cwd=str(root))
     _assert_filelist(rtl, filelist_out)
-    print("输出:", filelist_out.resolve())
-    print("断言通过：prelude 与 filelist 与黄金序一致")
+    print("Output:", filelist_out.resolve())
+    print("OK: prelude, filelist, and golden order checks passed.")
     return 0
 
 
