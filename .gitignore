@@ -1,0 +1,48 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Type check / lint caches
+.mypy_cache/
+.ruff_cache/
+
+# Cursor：忽略本地规则等，但保留仓库内引导与设计笔记（.cursor/skills/）
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
+
+# Example 生成物（prelude / filelist 输出）
+example/generated/
+
+# Bundled search binaries (from tools/download_*)
+tools/bin/
+
+# OS / editor (adjust if you commit editor settings)
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*~
