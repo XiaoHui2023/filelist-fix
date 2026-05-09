@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 class ToolBinaryLocator:
-    """仅在仓库 `tools/bin` 下定位 rg、fd（不读 PATH；仓库根由本包相对路径推断）。"""
+    """在仓库 `tools/bin` 或 PyInstaller 包内 `tools/bin` 定位 rg、fd（不读 PATH）。"""
 
     def __init__(self) -> None:
         self._root = self._infer_repo_root()
@@ -19,6 +19,10 @@ class ToolBinaryLocator:
         return Path.cwd()
 
     def tools_bin(self) -> Path:
+        if getattr(sys, "frozen", False):
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                return Path(meipass) / "tools" / "bin"
         return self._root / "tools" / "bin"
 
     def resolve_rg(self) -> str:
