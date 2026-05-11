@@ -10,10 +10,11 @@ from api.events.filelist_build import (
 
 @OnModuleResolveMissAPI.register
 def sink_module_resolve_miss(cb: OnModuleResolveMissAPI) -> None:
-    """Miss details at DEBUG; run-end summary on stderr and WARNING in log when ``-l`` is set."""
+    """Emit a WARNING when a logger is present so ``-l`` files see misses next to DEBUG context."""
     log = getattr(cb.ctx, "logger", None)
-    if log is not None and log.isEnabledFor(logging.DEBUG):
-        log.debug("module resolve miss (run-end summary on stderr): %s", cb.module_name)
+    if log is None:
+        return
+    log.warning('Not found module "%s"', cb.module_name)
 
 
 @OnModuleIndexInconsistentAPI.register

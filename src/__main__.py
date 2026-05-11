@@ -13,6 +13,7 @@ from rich.table import Column
 from rich.text import Text
 
 import impl  # noqa: F401  — register sinks
+from core.dependency_debug_dump import DependencyDebugDump
 from runtime.adaptive_bar_column import AdaptiveHueBarColumn
 from runtime.cli_parser import build_parser, flatten_append_groups
 from runtime.context import AppContext
@@ -60,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     preludes = flatten_append_groups(args.preludes)
     excludes = flatten_append_groups(args.excludes)
     log = _configure_logging(args.log_file)
+    dep_dbg = DependencyDebugDump(args.debug_dump) if args.debug_dump else None
     console = Console(stderr=True, color_system="truecolor")
     elapsed_col = Column(min_width=11, max_width=11, justify="right")
     desc_col = _description_table_column(console, _PROGRESS_BAR_WIDTH)
@@ -92,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
             console=console,
             rich_progress=progress,
             progress_task_id=tid,
+            dependency_debug_dump=dep_dbg,
         )
         app = FilelistApplication(
             search_roots=[Path(s) for s in sources],
@@ -107,7 +110,6 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Wrote filelist: {args.output.resolve()}", file=sys.stderr)
     for name in rb.state.unresolved_modules:
-        log.warning('Not found module "%s"', name)
         line = Text()
         line.append("Warning", style=_WARN_STYLE)
         line.append(f': Not found module "{name}"')

@@ -90,4 +90,12 @@ def build_parser() -> argparse.ArgumentParser:
         dest="log_file",
         help="Log file. Omit for no file logging (debug hooks only).",
     )
+    p.add_argument(
+        "--debug-dump",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        dest="debug_dump",
+        help="Write per-source dependency pipeline stages under DIR (README.txt explains). No relation to -l.",
+    )
     return p

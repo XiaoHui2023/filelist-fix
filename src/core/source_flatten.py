@@ -11,7 +11,12 @@ from api.resolve.verilog_text import (
 )
 from verilog_text.preproc import PreprocDirectiveParser
 from verilog_text.scan import scan_verilog_body
-from verilog_text.squeeze import join_continued_lines, squeeze_for_dependency_scan
+from verilog_text.squeeze import (
+    drop_alwaysish_blocks,
+    join_continued_lines,
+    squeeze_for_dependency_scan,
+    strip_comments_preserve_strings,
+)
 
 _INCLUDE = re.compile(r"^\s*`include\s+(?:\"([^\"]+)\"|<([^>]+)>)\s*(//.*)?$")
 
@@ -45,11 +50,14 @@ def flatten_active_text(
         return ""
     stack.add(path)
     try:
+        dbg = getattr(ctx, "dependency_debug_dump", None) if ctx is not None else None
         raw = path.read_text(encoding="utf-8", errors="replace")
         if ctx is not None:
             text = ctx.fire(JoinContinuedLinesAPI, raw_text=raw).joined_text
         else:
             text = join_continued_lines(raw)
+        if dbg is not None:
+            dbg.write_text(path, "01_joined.txt", text)
         chunks: list[str] = []
         for line in text.splitlines():
             if preproc.handle_directive_line(line):
@@ -65,7 +73,10 @@ def flatten_active_text(
                 continue
             if preproc.line_is_active_source():
                 chunks.append(line)
-        return "\n".join(chunks)
+        out = "\n".join(chunks)
+        if dbg is not None:
+            dbg.write_text(path, "02_flatten_merged.txt", out)
+        return out
     finally:
         stack.remove(path)
 
@@ -81,8 +92,27 @@ def extract_dependencies_from_file(
     pre = PreprocDirectiveParser(dict(initial_defines))
     flat = flatten_active_text(path, pre, incdirs, set(), 0, ctx)
     if ctx is not None:
+        dbg = getattr(ctx, "dependency_debug_dump", None)
+        if dbg is not None:
+            stripped = strip_comments_preserve_strings(flat)
+            dbg.write_text(path, "03a_strip_comments.txt", stripped)
+            dbg.write_text(path, "03b_drop_alwaysish.txt", drop_alwaysish_blocks(stripped))
         squ = ctx.fire(SqueezeForDependencyScanAPI, source_text=flat).squeezed_text
+        if dbg is not None:
+            dbg.write_text(path, "03c_squeeze_full.txt", squ)
         r = ctx.fire(ScanVerilogForDependenciesAPI, scanned_text=squ)
+        if dbg is not None:
+            dbg.write_text(
+                path,
+                "04_scan_result.txt",
+                "defined_modules: "
+                + ", ".join(r.defined_modules)
+                + "\nreferenced_modules: "
+                + ", ".join(r.referenced_modules)
+                + "\ninclude_paths: "
+                + ", ".join(r.include_paths)
+                + "\n",
+            )
         return r.defined_modules, r.referenced_modules, r.include_paths
     squ = squeeze_for_dependency_scan(flat)
     scan = scan_verilog_body(squ)
