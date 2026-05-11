@@ -20,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--source",
-        "-S",
+        "-s",
         dest="sources",
         action="append",
         default=[],
@@ -56,7 +56,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--save",
-        "-s",
         type=Path,
         default=None,
         metavar="FILE",

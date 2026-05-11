@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller 规格：onedir，附带 bundle 内 tools/bin（rg、fd）。
+"""PyInstaller 规格：onefile 单可执行文件，附带 bundle 内 tools/bin（rg、fd）。
 
 构建前请在仓库根执行 tools/download_rg_fd.sh 或 tools/download_rg_fd.bat，
 使 tools/bin 下已有对应平台的 rg 与 fd。
@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PyInstaller.building.api import COLLECT, EXE, PYZ
+from PyInstaller.building.api import EXE, PYZ
 from PyInstaller.building.build_main import Analysis
 from PyInstaller.utils.hooks import collect_submodules
 
@@ -66,28 +66,21 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
     [],
-    exclude_binaries=True,
     name="filelist-fix",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
+    upx_exclude=[],
+    runtime_tmpdir=None,
     console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name="filelist-fix",
 )

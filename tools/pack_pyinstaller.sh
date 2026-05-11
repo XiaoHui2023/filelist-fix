@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 一键：确保 tools/bin 内有 rg/fd，安装 PyInstaller（若缺），再打出 onedir 产物到 dist/filelist-fix/。
+# 一键：确保 tools/bin 内有 rg/fd，安装 PyInstaller（若缺），再打出 onefile 产物到 dist/filelist-fix（Windows 为 dist/filelist-fix.exe）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -74,15 +74,13 @@ rm -rf "$ROOT/build" "$ROOT/dist"
 echo "==> PyInstaller: $SPEC"
 "${PYTHON_CMD[@]}" -m PyInstaller --clean --noconfirm "$SPEC"
 
-OUT="$ROOT/dist/filelist-fix"
-if [[ ! -d "$OUT" ]]; then
-  echo "错误: 预期输出目录不存在: $OUT" >&2
+if [[ -f "$ROOT/dist/filelist-fix.exe" ]]; then
+  OUT="$ROOT/dist/filelist-fix.exe"
+elif [[ -f "$ROOT/dist/filelist-fix" ]]; then
+  OUT="$ROOT/dist/filelist-fix"
+else
+  echo "错误: 未在 dist 找到 filelist-fix 可执行文件（预期 dist/filelist-fix 或 dist/filelist-fix.exe）。" >&2
   exit 1
 fi
 
 echo "完成: $OUT"
-if [[ -f "$OUT/filelist-fix.exe" ]]; then
-  echo "  可执行: $OUT/filelist-fix.exe"
-else
-  echo "  可执行: $OUT/filelist-fix"
-fi
