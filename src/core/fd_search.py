@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from core.hdl_extensions import HD_SOURCE_EXTENSIONS
+from core.path_exclude import path_is_excluded
 
 
 class FdModuleSearch:
@@ -17,9 +18,15 @@ class FdModuleSearch:
         exts = "|".join(re.escape(e) for e in HD_SOURCE_EXTENSIONS)
         return rf"^{re.escape(module_name)}\.({exts})$"
 
-    def search(self, module_name: str, roots: list[Path]) -> Path | None:
+    def search(
+        self,
+        module_name: str,
+        roots: list[Path],
+        excludes: list[Path] | None = None,
+    ) -> Path | None:
         pattern = self._regex(module_name)
         best: Path | None = None
+        excl = excludes or []
         for root in roots:
             try:
                 cp = subprocess.run(
@@ -39,6 +46,8 @@ class FdModuleSearch:
                 if not line:
                     continue
                 cand = Path(line).resolve()
+                if path_is_excluded(cand, excl):
+                    continue
                 if best is None or len(cand.parts) < len(best.parts):
                     best = cand
         return best

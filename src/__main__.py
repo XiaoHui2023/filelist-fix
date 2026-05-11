@@ -1,82 +1,36 @@
 from __future__ import annotations
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from rich.progress import Progress, SpinnerColumn, TaskProgressColumn, TextColumn, TimeElapsedColumn
+from rich.table import Column
 
 import impl  # noqa: F401  — register sinks
+from runtime.adaptive_bar_column import AdaptiveHueBarColumn
+from runtime.cli_parser import build_parser, flatten_append_groups
 from runtime.context import AppContext
 from runtime.filelist_app import FilelistApplication
 
+# 进度条：HueBar（按完成比例红→黄→绿）；宽度参与描述列留白计算（含百分比列）。
+_PROGRESS_BAR_WIDTH = 28
+_PROGRESS_PCT_COL = Column(min_width=5, max_width=5, justify="right")
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="filelist-fix",
-        description="Collect Verilog/SystemVerilog dependencies from top modules and emit a filelist.",
-    )
-    p.add_argument(
-        "--source",
-        "-s",
-        dest="sources",
-        action="append",
-        default=[],
-        metavar="PATH",
-        required=True,
-        help="Source root or file to search (repeatable).",
-    )
-    p.add_argument(
-        "--top",
-        "-t",
-        dest="tops",
-        action="append",
-        default=[],
-        required=True,
-        help="Top-level module name (repeatable).",
-    )
-    p.add_argument(
-        "--prelude",
-        "-p",
-        dest="preludes",
-        action="append",
-        default=[],
-        metavar="FILE",
-        help="Prelude file(s): +define+ / +incdir+ or plain lines prepended to output (repeatable, order preserved).",
-    )
-    p.add_argument(
-        "--output",
-        "-o",
-        type=Path,
-        required=True,
-        metavar="FILE",
-        help="Write filelist to this path (prelude lines then ordered paths).",
-    )
-    p.add_argument(
-        "--save",
-        type=Path,
-        default=None,
-        metavar="FILE",
-        help="SQLite file for per-file parse cache; reuse when sources unchanged (mtime/size). Omit to disable. A .db suffix is typical.",
-    )
-    p.add_argument(
-        "--path-style",
-        choices=("relative", "absolute"),
-        default="relative",
-        help="How to write source paths in the filelist body: relative to the output file's directory (default), or absolute. Prelude lines are unchanged.",
-    )
-    p.add_argument(
-        "--log",
-        "-l",
-        type=Path,
-        default=None,
-        metavar="FILE",
-        dest="log_file",
-        help="Log file. Omit for no file logging (debug hooks only).",
-    )
-    return p
+
+def _description_table_column(console: Console, bar_width: int) -> Column:
+    """描述列宽度：按终端剩余宽度给足 ``max_width``，过长仍 ``ellipsis``（未写日志的详情在 -l）。"""
+    w = console.width
+    if w is None or w < 30:
+        w = 80
+    bw = max(1, int(bar_width))
+    # spinner + 条形 + 百分比列 + 耗时 + 列间留白
+    reserved = 3 + bw + 5 + 11 + 10
+    desc_max = max(16, w - reserved)
+    # 短终端时 min 不超过 max，避免 min_width>max_width
+    min_w = min(52, desc_max)
+    return Column(min_width=min_w, max_width=desc_max, overflow="ellipsis", no_wrap=True)
 
 
 def _configure_logging(path: Path | None) -> logging.Logger:
@@ -96,17 +50,38 @@ def _configure_logging(path: Path | None) -> logging.Logger:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    sources = flatten_append_groups(args.sources)
+    tops = flatten_append_groups(args.tops)
+    preludes = flatten_append_groups(args.preludes)
+    excludes = flatten_append_groups(args.excludes)
     log = _configure_logging(args.log_file)
     console = Console(stderr=True)
+    elapsed_col = Column(min_width=11, max_width=11, justify="right")
+    desc_col = _description_table_column(console, _PROGRESS_BAR_WIDTH)
 
     with Progress(
         SpinnerColumn("dots", style="progress.spinner"),
-        TextColumn("{task.description}"),
-        TimeElapsedColumn(),
+        TextColumn(
+            "{task.description}",
+            markup=True,
+            justify="left",
+            table_column=desc_col,
+        ),
+        AdaptiveHueBarColumn(bar_width=_PROGRESS_BAR_WIDTH),
+        TaskProgressColumn(
+            text_format="[grey70]{task.percentage:>3.0f}%[/grey70]",
+            table_column=_PROGRESS_PCT_COL,
+        ),
+        TimeElapsedColumn(table_column=elapsed_col),
         console=console,
         transient=True,
+        expand=True,
     ) as progress:
-        tid = progress.add_task("Starting...", total=None)
+        tid = progress.add_task(
+            "Starting...",
+            total=max(1, len(tops)),
+            completed=0,
+        )
         ctx = AppContext(
             logger=log,
             console=console,
@@ -114,17 +89,20 @@ def main(argv: list[str] | None = None) -> int:
             progress_task_id=tid,
         )
         app = FilelistApplication(
-            search_roots=[Path(s) for s in args.sources],
-            top_modules=args.tops,
-            prelude_paths=[Path(f) for f in args.preludes],
+            search_roots=[Path(s) for s in sources],
+            top_modules=tops,
+            prelude_paths=[Path(f) for f in preludes],
             output_path=args.output,
             save_path=args.save,
             path_style=args.path_style,
+            exclude_paths=[Path(x) for x in excludes],
             ctx=ctx,
         )
         rb = app.run()
 
     print(f"Wrote filelist: {args.output.resolve()}", file=sys.stderr)
+    for name in rb.state.unresolved_modules:
+        print(f'Warning: Not found module "{name}"', file=sys.stderr)
     return 0
 
 

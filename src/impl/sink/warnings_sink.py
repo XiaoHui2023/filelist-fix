@@ -10,9 +10,10 @@ from api.events.filelist_build import (
 
 @OnModuleResolveMissAPI.register
 def sink_module_resolve_miss(cb: OnModuleResolveMissAPI) -> None:
-    """Log unresolved module names."""
-    log = getattr(cb.ctx, "logger", None) or logging.getLogger(__name__)
-    log.warning("module not found, skipping: %s", cb.module_name)
+    """Miss details go to debug log; stderr summary uses print after the run."""
+    log = getattr(cb.ctx, "logger", None)
+    if log is not None and log.isEnabledFor(logging.DEBUG):
+        log.debug("module resolve miss (stderr summary at end): %s", cb.module_name)
 
 
 @OnModuleIndexInconsistentAPI.register

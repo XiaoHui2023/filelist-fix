@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from core.hdl_extensions import rg_include_globs
+from core.path_exclude import path_is_excluded
 
 
 class RgModuleSearch:
@@ -15,8 +16,14 @@ class RgModuleSearch:
     def _pattern(self, module_name: str) -> str:
         return rf"module\s+{module_name}\b"
 
-    def search(self, module_name: str, roots: list[Path]) -> Path | None:
+    def search(
+        self,
+        module_name: str,
+        roots: list[Path],
+        excludes: list[Path] | None = None,
+    ) -> Path | None:
         best: Path | None = None
+        excl = excludes or []
         pat = self._pattern(module_name)
         for root in roots:
             cmd = [self._rg, "-l", "-S", "-e", pat]
@@ -41,6 +48,8 @@ class RgModuleSearch:
                 if not line:
                     continue
                 cand = Path(line).resolve()
+                if path_is_excluded(cand, excl):
+                    continue
                 if best is None or len(cand.parts) < len(best.parts):
                     best = cand
         return best
