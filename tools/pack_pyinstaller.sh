@@ -45,14 +45,17 @@ ensure_tools_bin() {
 ensure_tools_bin
 
 if [[ -z "${PYTHON_CMD+x}" ]]; then
-  if command -v python3 >/dev/null 2>&1; then
-    PYTHON_CMD=(python3)
-  elif command -v python >/dev/null 2>&1; then
-    PYTHON_CMD=(python)
+  if [[ -f "$ROOT/.venv/Scripts/python.exe" ]]; then
+    PYTHON_CMD=("$ROOT/.venv/Scripts/python.exe")
+  elif [[ -f "$ROOT/.venv/bin/python" ]]; then
+    PYTHON_CMD=("$ROOT/.venv/bin/python")
   else
-    echo "错误: 未找到 python3 或 python，请设置 PYTHON_CMD" >&2
+    echo "错误: 未在仓库根找到虚拟环境解释器（需要 .venv/Scripts/python.exe 或 .venv/bin/python）。" >&2
+    echo "请先创建并安装依赖，例如: python -m venv .venv 然后 pip install -e .（在已激活的 .venv 内）。" >&2
+    echo "若必须使用其它解释器，请设置环境变量 PYTHON_CMD。" >&2
     exit 1
   fi
+  echo "==> 使用虚拟环境: ${PYTHON_CMD[*]}"
 else
   # shellcheck disable=SC2206
   PYTHON_CMD=($PYTHON_CMD)
