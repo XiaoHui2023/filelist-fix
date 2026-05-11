@@ -18,3 +18,14 @@ def test_cli_multi_value_after_one_flag_equivalent_to_repeat() -> None:
     )
     assert flatten_append_groups(once.sources) == flatten_append_groups(repeat.sources)
     assert flatten_append_groups(once.tops) == flatten_append_groups(repeat.tops)
+
+
+def test_cli_exclude_short_x_and_multi_value() -> None:
+    a = build_parser().parse_args(
+        ["-s", "r1", "-t", "m1", "-o", "out.f", "-x", "e1", "e2"],
+    )
+    assert flatten_append_groups(a.excludes) == ["e1", "e2"]
+    b = build_parser().parse_args(
+        ["-s", "r1", "-t", "m1", "-o", "out.f", "--exclude", "a", "--exclude", "b"],
+    )
+    assert flatten_append_groups(b.excludes) == ["a", "b"]

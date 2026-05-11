@@ -4,9 +4,13 @@ import logging
 import sys
 from pathlib import Path
 
+from rich.color import Color
+from rich.color_triplet import ColorTriplet
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TaskProgressColumn, TextColumn, TimeElapsedColumn
+from rich.style import Style
 from rich.table import Column
+from rich.text import Text
 
 import impl  # noqa: F401  — register sinks
 from runtime.adaptive_bar_column import AdaptiveHueBarColumn
@@ -17,6 +21,7 @@ from runtime.filelist_app import FilelistApplication
 # 进度条：HueBar（按完成比例红→黄→绿）；宽度参与描述列留白计算（含百分比列）。
 _PROGRESS_BAR_WIDTH = 28
 _PROGRESS_PCT_COL = Column(min_width=5, max_width=5, justify="right")
+_WARN_STYLE = Style(color=Color.from_triplet(ColorTriplet(255, 220, 60)))
 
 
 def _description_table_column(console: Console, bar_width: int) -> Column:
@@ -55,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     preludes = flatten_append_groups(args.preludes)
     excludes = flatten_append_groups(args.excludes)
     log = _configure_logging(args.log_file)
-    console = Console(stderr=True)
+    console = Console(stderr=True, color_system="truecolor")
     elapsed_col = Column(min_width=11, max_width=11, justify="right")
     desc_col = _description_table_column(console, _PROGRESS_BAR_WIDTH)
 
@@ -102,7 +107,11 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Wrote filelist: {args.output.resolve()}", file=sys.stderr)
     for name in rb.state.unresolved_modules:
-        print(f'Warning: Not found module "{name}"', file=sys.stderr)
+        log.warning('Not found module "%s"', name)
+        line = Text()
+        line.append("Warning", style=_WARN_STYLE)
+        line.append(f': Not found module "{name}"')
+        console.print(line)
     return 0
 
 
