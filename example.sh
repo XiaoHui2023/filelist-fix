@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 在 .venv 中运行示例 demo.py（对应 example.bat）；若无 venv 则先执行 update.sh。
+# 使用静态 example/run_prelude.f，在 example/generated 写出 demo_filelist.f（对应 example.bat）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,4 +11,13 @@ fi
 
 # shellcheck disable=SC1091
 source "$ROOT/.venv/bin/activate"
-python "$ROOT/example/demo.py" "$@"
+
+mkdir -p "$ROOT/example/generated"
+RTL="$ROOT/example/complex_rtl"
+PRELUDE="$ROOT/example/run_prelude.f"
+FILELIST="$ROOT/example/generated/demo_filelist.f"
+
+abs() { (cd "$1" && pwd); }
+
+echo "filelist-fix example: python \"$ROOT/src\" --source \"$(abs "$RTL")\" -t top_chip -p \"$PRELUDE\" -o \"$FILELIST\""
+python "$ROOT/src" --source "$(abs "$RTL")" -t top_chip -p "$PRELUDE" -o "$FILELIST"

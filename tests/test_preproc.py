@@ -34,3 +34,15 @@ def test_prelude_defines(tmp_path: Path) -> None:
     f.write_text(f'+define+FOO=1\n+incdir+"{tmp_path}"\n', encoding="utf-8")
     out = load_prelude_files([f])
     assert "FOO" in out.defines
+
+
+def test_prelude_relative_incdir(tmp_path: Path) -> None:
+    here = tmp_path / "sub"
+    here.mkdir()
+    tgt = tmp_path / "inc_here"
+    tgt.mkdir()
+    prelude = here / "pre.f"
+    prelude.write_text('+incdir+"../inc_here"\n', encoding="utf-8")
+    out = load_prelude_files([prelude])
+    assert len(out.incdirs) == 1
+    assert out.incdirs[0] == tgt.resolve()

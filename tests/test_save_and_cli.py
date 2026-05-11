@@ -56,14 +56,7 @@ def test_cli_writes_summary_to_stderr(tmp_path: Path) -> None:
     if not project_has_tools_bin(root):
         pytest.skip("工程 tools/bin 下缺少 rg/fd，请先运行 tools 下载脚本")
     rtl = root / "example" / "complex_rtl"
-    prelude = root / "example" / "generated" / "run_prelude.f"
-    if not prelude.is_file():
-        subprocess.run(
-            [sys.executable, str(root / "example" / "demo.py")],
-            cwd=root,
-            check=False,
-            capture_output=True,
-        )
+    prelude = root / "example" / "run_prelude.f"
     out = tmp_path / "out.f"
     proc = subprocess.run(
         [
@@ -99,14 +92,7 @@ def test_cli_absolute_path_style(tmp_path: Path) -> None:
     if not project_has_tools_bin(root):
         pytest.skip("工程 tools/bin 下缺少 rg/fd，请先运行 tools 下载脚本")
     rtl = root / "example" / "complex_rtl"
-    prelude = root / "example" / "generated" / "run_prelude.f"
-    if not prelude.is_file():
-        subprocess.run(
-            [sys.executable, str(root / "example" / "demo.py")],
-            cwd=root,
-            check=False,
-            capture_output=True,
-        )
+    prelude = root / "example" / "run_prelude.f"
     out = tmp_path / "abs.f"
     proc = subprocess.run(
         [
