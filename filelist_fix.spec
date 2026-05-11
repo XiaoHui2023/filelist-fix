@@ -1,8 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller 规格：onefile 单可执行文件，附带 bundle 内 tools/bin（rg、fd）。
 
-构建前请在仓库根执行 tools/download_rg_fd.sh 或 tools/download_rg_fd.bat，
-使 tools/bin 下已有对应平台的 rg 与 fd。
+构建入口：仓库根执行 bash tools/pack.sh（内部会下载 rg/fd、用 .venv 跑 PyInstaller；
+Linux 上再跑 staticx）。仅打 spec 时请先自行执行 tools/download_rg_fd.sh 或 .bat。
 """
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 下载 ripgrep 与 fd 到 tools/bin（静态/通用二进制，按常见架构选择资产）。
+# 下载 ripgrep 与 fd 到 tools/bin（按架构选发布包；Linux x86_64/aarch64 的 fd 使用 musl 包以降低对 glibc 版本的要求）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,11 +23,11 @@ case "$OS" in
     case "$ARCH" in
       x86_64|amd64)
         rg_asset="ripgrep-${RG_VER}-x86_64-unknown-linux-musl.tar.gz"
-        fd_asset="fd-v${FD_VER}-x86_64-unknown-linux-gnu.tar.gz"
+        fd_asset="fd-v${FD_VER}-x86_64-unknown-linux-musl.tar.gz"
         ;;
       aarch64|arm64)
         rg_asset="ripgrep-${RG_VER}-aarch64-unknown-linux-gnu.tar.gz"
-        fd_asset="fd-v${FD_VER}-aarch64-unknown-linux-gnu.tar.gz"
+        fd_asset="fd-v${FD_VER}-aarch64-unknown-linux-musl.tar.gz"
         ;;
       *)
         echo "不支持的架构: $ARCH"; exit 1 ;;

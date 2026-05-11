@@ -25,6 +25,17 @@ chmod +x tools/download_rg_fd.sh
 ./tools/download_rg_fd.sh
 ```
 
+## 一键打包（PyInstaller；Linux 再 staticx）
+
+在仓库根执行（会先确保 `tools/bin` 的 rg、fd，再使用根目录 `.venv`，无则创建）：
+
+```bash
+chmod +x tools/pack.sh
+./tools/pack.sh
+```
+
+Linux 另需系统安装 **`patchelf`**（如 `sudo apt install patchelf`）。产物：**`dist/filelist-fix`**（Linux 为 staticx 处理后的单文件）或 **`dist/filelist-fix.exe`**（Windows）。**macOS** 当前脚本跳过 staticx，仅 PyInstaller 产物。
+
 ## Windows
 
 在「开发者命令提示符」或 PowerShell 中：
