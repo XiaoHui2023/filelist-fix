@@ -114,6 +114,8 @@ def main(argv: list[str] | None = None) -> int:
         line.append("Warning", style=_WARN_STYLE)
         line.append(f': Not found module "{name}"')
         console.print(line)
+        if args.log_file is not None:
+            log.warning('Not found module "%s"', name)
     return 0
 
 

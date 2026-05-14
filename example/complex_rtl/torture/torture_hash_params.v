@@ -11,5 +11,8 @@ module torture_hash_params ();
     `TORTURE_P_W, `TORTURE_P_D \
   ) ();
   torture_param_leaf #() u_default ();
+  torture_param_leaf #(.W(5'ha), .D(1'd1)) u_sized_dec_hex ();
+  torture_param_leaf #(.W({4'd1, 4'd0}), .D(2)) u_param_concat ();
+  torture_param_leaf #(.W({4{1'b1}}), .D(1)) u_repl_concat ();
   torture_dep_a u_keep ();
 endmodule

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from verilog_text.scan import scan_verilog_body
+from verilog_text.scan import _parse_module_instantiation, scan_verilog_body
 from verilog_text.squeeze import squeeze_for_dependency_scan
 
 
@@ -86,3 +86,32 @@ endmodule
 """
     r = scan_verilog_body(squeeze_for_dependency_scan(src))
     assert "y" not in r.referenced_modules
+
+
+def test_sized_literals_d_h_in_param_hash() -> None:
+    """位宽进制字面量（如 5'ha、1'd1）中的单引号不得干扰 #() 括号配对。"""
+    src = """
+module m ();
+  torture_param_leaf #(.W(5'ha), .D(1'd1)) u1 ();
+endmodule
+"""
+    r = scan_verilog_body(squeeze_for_dependency_scan(src))
+    assert r.defined_modules == ["m"]
+    assert set(r.referenced_modules) == {"torture_param_leaf"}
+
+
+def test_concat_and_replication_in_param_hash() -> None:
+    """端口映射或参数里的 {a,b}、{N{…}} 不得打断例化行解析。"""
+    src = """
+module m ();
+  torture_param_leaf #(.W({4'd1, 4'd0}), .D(2)) u_cat ();
+  torture_param_leaf #(.W({4{1'b1}}), .D(1)) u_rep ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    inst_lines = [ln for ln in squ.splitlines() if "torture_param_leaf" in ln]
+    assert len(inst_lines) == 2
+    assert all(_parse_module_instantiation(ln, "m") == "torture_param_leaf" for ln in inst_lines)
+    r = scan_verilog_body(squ)
+    assert r.defined_modules == ["m"]
+    assert r.referenced_modules == ["torture_param_leaf"]
