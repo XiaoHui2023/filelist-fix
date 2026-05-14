@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import re
 
-from verilog_text.scan import _consume_h_ws, _ENDMODULE, _MODULE_HEAD, _skip_balanced_parens
+from verilog_text.scan import (
+    _consume_h_ws,
+    _ENDMODULE,
+    _MODULE_HEAD,
+    _skip_balanced_parens,
+    skeletonize_scanned_verilog_for_dependency_scan,
+)
 
 _BLOCK_COM = re.compile(r"/\*.*?\*/", re.DOTALL)
 _LINE_COM = re.compile(r"//.*?$", re.MULTILINE)
@@ -156,17 +162,19 @@ def squeeze_pipeline_for_dependency_scan(
 
     Returns:
         (strip_comments, drop_alwaysish, strip_decl_noise, strip_module_ports, scan_input).
+        最后一项在 strip_module_ports 之后对例化最外层端口括弧内做空白化，再送入扫描。
     """
 
     a = strip_comments_preserve_strings(src)
     b = drop_alwaysish_blocks(a)
     c = strip_decl_noise_lines(b)
     d = strip_module_port_regions(c)
-    return a, b, c, d, d
+    e = skeletonize_scanned_verilog_for_dependency_scan(d)
+    return a, b, c, d, e
 
 
 def squeeze_for_dependency_scan(src: str) -> str:
-    """组合去注释、过程块删除、声明噪声与 module 端口前缀剥离，得到依赖扫描输入。"""
+    """组合去注释、过程块、声明噪声、module 端口剥离与例化端口骨架化，得到依赖扫描输入。"""
     return squeeze_pipeline_for_dependency_scan(src)[-1]
 
 

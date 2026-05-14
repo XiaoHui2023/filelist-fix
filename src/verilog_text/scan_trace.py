@@ -9,7 +9,11 @@ from verilog_text.scan import (
 
 
 def build_instance_scan_trace(text: str) -> str:
-    """生成与 ``scan_verilog_body`` 对齐的例化/bind 逐行判定说明，供 --debug-dump 写入。"""
+    """生成与 ``scan_verilog_body`` 对齐的例化/bind 逐行判定说明，供 --debug-dump 写入。
+
+    多行例化的中间行仍可能为 SKIP（本函数按行调用 ``parse_instance_line_analysis``），
+    与 ``scan_verilog_body`` 的整段锚点扫描结论不必逐行一致。
+    """
 
     parts: list[str] = []
     pos = 0

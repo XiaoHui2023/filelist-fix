@@ -100,6 +100,40 @@ endmodule
     assert set(r.referenced_modules) == {"torture_param_leaf"}
 
 
+def test_multiline_named_instance_and_params() -> None:
+    """模块类型、#(…)、实例名与端口表均可跨空白与换行。"""
+    src = """
+module m ();
+  torture_ml_leaf
+#(
+   .W(4),
+   .D(2)
+)
+  u_ml
+(
+    .a(1),
+    .b(2)
+  );
+endmodule
+"""
+    r = scan_verilog_body(squeeze_for_dependency_scan(src))
+    assert r.defined_modules == ["m"]
+    assert "torture_ml_leaf" in r.referenced_modules
+
+
+def test_multiline_anonymous_instance() -> None:
+    src = """
+module m ();
+  torture_anon
+  (
+    .x(1)
+  );
+endmodule
+"""
+    r = scan_verilog_body(squeeze_for_dependency_scan(src))
+    assert "torture_anon" in r.referenced_modules
+
+
 def test_concat_and_replication_in_param_hash() -> None:
     """端口映射或参数里的 {a,b}、{N{…}} 不得打断例化行解析。"""
     src = """

@@ -34,7 +34,7 @@ _README = """依赖解析调试输出（本目录由 --debug-dump 生成）
 5. 03b_drop_alwaysish.txt — 再删掉 always / initial / final 等过程块（启发式）。
 6. 03c_strip_decl_noise.txt — 按行去掉 assign、localparam、parameter、wire/reg/logic 等声明行（启发式，减轻误匹配）。
 7. 03d_strip_module_ports.txt — 在每个 module…endmodule 体内去掉 #(…) 与端口表等 module 头尾残留。
-8. 03e_scan_input.txt — 送入 `scan_verilog_body` 的最终文本（与 `SqueezeForDependencyScanAPI` 输出一致）。
+8. 03e_scan_input.txt — 在 **03d** 之后将**已识别例化**的最外层端口括弧内部换成空白（减轻误匹配、便于按行粗查），再送入 `scan_verilog_body`（与 `SqueezeForDependencyScanAPI` 输出一致）。
 9. 04_scan_result.txt — defined / referenced / include 列表摘要。
 10. 05_instance_scan_trace.txt — 各 module 体内及全文件 bind 第二遍的逐行判定：MATCH（模块类型与规则简述）、SKIP（未匹配原因）、BIND。
 

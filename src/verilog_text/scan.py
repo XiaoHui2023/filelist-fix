@@ -3,6 +3,39 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+_ANCHOR_BEFORE_INSTANCE = frozenset(
+    {
+        "begin",
+        "end",
+        "else",
+        "endgenerate",
+        "endcase",
+        "generate",
+        "case",
+        "casex",
+        "casez",
+        "default",
+        "for",
+        "foreach",
+        "while",
+        "repeat",
+        "do",
+        "if",
+        "wait",
+        "forever",
+        "unique",
+        "priority",
+        "final",
+        "always",
+        "always_ff",
+        "always_comb",
+        "initial",
+        "specify",
+        "endspecify",
+    }
+)
+_ID_HEAD = re.compile(r"([A-Za-z_]\w*)\b")
+
 _MODULE_HEAD = re.compile(
     r"(?m)^\s*module\s+(?:automatic\s+)?([A-Za-z_]\w*)\b",
 )
@@ -105,6 +138,44 @@ def _consume_h_ws(s: str, i: int) -> int:
     return i
 
 
+def _skip_ws_any(s: str, i: int) -> int:
+    """跳过各类空白（含换行），用于跨行例化形态。"""
+    n = len(s)
+    while i < n and s[i] in " \t\n\r\v\f":
+        i += 1
+    return i
+
+
+def _word_ending_at(s: str, j: int) -> str | None:
+    """若 ``s[j]`` 落在标识符尾上，返回该标识符全文，否则返回 None。"""
+    if j < 0 or j >= len(s) or not (s[j].isalnum() or s[j] == "_"):
+        return None
+    hi = j
+    while hi + 1 < len(s) and (s[hi + 1].isalnum() or s[hi + 1] == "_"):
+        hi += 1
+    lo = j
+    while lo - 1 >= 0 and (s[lo - 1].isalnum() or s[lo - 1] == "_"):
+        lo -= 1
+    return s[lo : hi + 1]
+
+
+def _at_instance_scan_anchor(s: str, pos: int) -> bool:
+    """仅在「像新语句起点」处尝试例化，避免把 ``u1`` 当成模块类型误扫。"""
+    if pos == 0:
+        return True
+    j = pos - 1
+    while j >= 0 and s[j] in " \t\r\v\f":
+        j -= 1
+    if j < 0:
+        return True
+    if s[j] == "\n":
+        return True
+    if s[j] in ";{}():":
+        return True
+    w = _word_ending_at(s, j)
+    return w is not None and w in _ANCHOR_BEFORE_INSTANCE
+
+
 def _skip_balanced_parens(s: str, i: int) -> int:
     """假定 s[i] == '('，返回与之匹配的 ')' 之后下标；若不配对则停在串末。"""
     n = len(s)
@@ -121,6 +192,120 @@ def _skip_balanced_parens(s: str, i: int) -> int:
                 return i + 1
         i += 1
     return i
+
+
+@dataclass(frozen=True)
+class _ModuleInstSpan:
+    """一次成功识别的例化：模块类型名、分号后下标、最外层端口表括号范围。"""
+
+    mod_type: str
+    end: int
+    port_open: int
+    port_close_excl: int
+
+
+def _try_parse_module_instantiation_span(s: str, pos: int, self_mod: str) -> _ModuleInstSpan | None:
+    """从 ``pos`` 起解析命名/匿名例化至结束分号；失败返回 None。"""
+    n = len(s)
+    i = _skip_ws_any(s, pos)
+    m = _ID_HEAD.match(s, i)
+    if not m:
+        return None
+    t = m.group(1)
+    if t in _kw or t == self_mod:
+        return None
+    i = _skip_ws_any(s, m.end())
+    if i < n and s[i] == "#":
+        i += 1
+        i = _skip_ws_any(s, i)
+        if i >= n or s[i] != "(":
+            return None
+        i = _skip_balanced_parens(s, i)
+        i = _skip_ws_any(s, i)
+    if i < n and s[i] == "(":
+        port_open = i
+        i = _skip_balanced_parens(s, i)
+        port_close_excl = i
+        i = _skip_ws_any(s, i)
+        if i >= n or s[i] != ";":
+            return None
+        return _ModuleInstSpan(t, i + 1, port_open, port_close_excl)
+    m2 = _ID_HEAD.match(s, i)
+    if not m2:
+        return None
+    inst = m2.group(1)
+    if inst in _kw:
+        return None
+    i = _skip_ws_any(s, m2.end())
+    if i >= n or s[i] != "(":
+        return None
+    port_open = i
+    i = _skip_balanced_parens(s, i)
+    port_close_excl = i
+    i = _skip_ws_any(s, i)
+    if i >= n or s[i] != ";":
+        return None
+    return _ModuleInstSpan(t, i + 1, port_open, port_close_excl)
+
+
+def _collect_instance_refs_span_scan(body: str, self_mod: str, refs: list[str]) -> None:
+    """跨行例化：仅在锚点处尝试解析，避免实例名被当成模块类型。"""
+    pos = 0
+    n = len(body)
+    while pos < n:
+        if _at_instance_scan_anchor(body, pos):
+            hit = _try_parse_module_instantiation_span(body, pos, self_mod)
+            if hit:
+                refs.append(hit.mod_type)
+                pos = hit.end
+                continue
+        pos += 1
+
+
+def skeletonize_body_instance_ports(body: str, self_mod: str) -> str:
+    """将本段内已识别例化的最外层端口括弧内部换成空白，便于基于行的检索且不改变括号层级。"""
+    spans: list[_ModuleInstSpan] = []
+    pos = 0
+    n = len(body)
+    while pos < n:
+        if _at_instance_scan_anchor(body, pos):
+            hit = _try_parse_module_instantiation_span(body, pos, self_mod)
+            if hit:
+                spans.append(hit)
+                pos = hit.end
+                continue
+        pos += 1
+    out = body
+    for sp in reversed(spans):
+        lo = sp.port_open + 1
+        hi = sp.port_close_excl - 1
+        if lo < hi:
+            out = out[:lo] + (" " * (hi - lo)) + out[hi:]
+    return out
+
+
+def skeletonize_scanned_verilog_for_dependency_scan(text: str) -> str:
+    """按 module…endmodule 分段，对各段体内做 ``skeletonize_body_instance_ports``。"""
+    pieces: list[str] = []
+    pos = 0
+    while True:
+        mh = _MODULE_HEAD.search(text, pos)
+        if not mh:
+            tail = text[pos:]
+            if tail:
+                pieces.append(skeletonize_body_instance_ports(tail, ""))
+            break
+        pieces.append(text[pos : mh.end()])
+        em = _ENDMODULE.search(text, mh.end())
+        if not em:
+            pieces.append(skeletonize_body_instance_ports(text[mh.end() :], mh.group(1)))
+            break
+        name = mh.group(1)
+        body = text[mh.end() : em.start()]
+        pieces.append(skeletonize_body_instance_ports(body, name))
+        pieces.append(text[em.start() : em.end()])
+        pos = em.end()
+    return "".join(pieces)
 
 
 def parse_instance_line_analysis(line: str, self_mod: str) -> tuple[str | None, str]:
@@ -207,10 +392,8 @@ class VerilogSliceScan:
 
 
 def _collect_refs_from_body(body: str, self_mod: str, refs: list[str]) -> None:
+    _collect_instance_refs_span_scan(body, self_mod, refs)
     for line in body.splitlines():
-        hit = _parse_module_instantiation(line, self_mod)
-        if hit:
-            refs.append(hit)
         bh = _parse_bind_line(line)
         if bh:
             refs.append(bh)
