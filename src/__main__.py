@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import sys
 from pathlib import Path
 
@@ -18,6 +17,7 @@ from runtime.adaptive_bar_column import AdaptiveHueBarColumn
 from runtime.cli_parser import build_parser, flatten_append_groups
 from runtime.context import AppContext
 from runtime.filelist_app import FilelistApplication
+from runtime.logging_setup import configure_cli_logging
 
 # 进度条：HueBar（按完成比例红→黄→绿）；宽度参与描述列留白计算（含百分比列）。
 _PROGRESS_BAR_WIDTH = 28
@@ -39,28 +39,13 @@ def _description_table_column(console: Console, bar_width: int) -> Column:
     return Column(min_width=min_w, max_width=desc_max, overflow="ellipsis", no_wrap=True)
 
 
-def _configure_logging(path: Path | None) -> logging.Logger:
-    log = logging.getLogger("filelist_fix")
-    log.handlers.clear()
-    log.propagate = False
-    if path is None:
-        log.addHandler(logging.NullHandler())
-        log.setLevel(logging.WARNING)
-        return log
-    fh = logging.FileHandler(path, encoding="utf-8")
-    fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    log.addHandler(fh)
-    log.setLevel(logging.DEBUG)
-    return log
-
-
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     sources = flatten_append_groups(args.sources)
     tops = flatten_append_groups(args.tops)
     preludes = flatten_append_groups(args.preludes)
     excludes = flatten_append_groups(args.excludes)
-    log = _configure_logging(args.log_file)
+    log = configure_cli_logging(args.log_file)
     dep_dbg = DependencyDebugDump(args.debug_dump) if args.debug_dump else None
     console = Console(stderr=True, color_system="truecolor")
     elapsed_col = Column(min_width=11, max_width=11, justify="right")

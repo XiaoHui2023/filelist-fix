@@ -27,10 +27,13 @@ class DropAlwaysishBlocksAPI(BaseAPI):
 
 
 class SqueezeForDependencyScanAPI(BaseAPI):
-    """Full squeeze pipeline (comments + procedural drop) used before module/instance regex scan."""
+    """Squeeze pipeline before module/instance regex scan (comments, procedural blocks, decl noise, module port preambles)."""
 
     source_text: str = Field(description="Flattened active-branch source text")
-    squeezed_text: str = Field(default="", description="Output ready for dependency regex scan")
+    squeezed_text: str = Field(
+        default="",
+        description="Text after comment strip, procedural drop, decl-noise line blanking, and per-module port header strip",
+    )
 
 
 class ScanVerilogForDependenciesAPI(BaseAPI):

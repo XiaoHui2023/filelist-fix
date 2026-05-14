@@ -18,7 +18,11 @@ def sink_progress_visual(cb: OnProgressAPI) -> None:
     if log is not None and log.isEnabledFor(logging.DEBUG):
         parts = [p for p in (cb.phase, cb.message) if p]
         extra = f"{cb.current}/{cb.total}" if cb.total is not None else ""
-        log.debug("progress %s %s", " · ".join(parts) if parts else "(tick)", extra)
+        log.debug(
+            "progress | %s | %s",
+            " · ".join(parts) if parts else "(tick)",
+            extra,
+        )
 
     if prog is None or tid is None:
         return

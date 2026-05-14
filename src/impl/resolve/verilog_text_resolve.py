@@ -36,7 +36,7 @@ def resolve_drop_alwaysish(cb: DropAlwaysishBlocksAPI) -> None:
 
 @SqueezeForDependencyScanAPI.register
 def resolve_squeeze_for_dep_scan(cb: SqueezeForDependencyScanAPI) -> None:
-    """Run the combined squeeze pipeline used before dependency regex."""
+    """Run squeeze pipeline (comments, procedural blocks, decl noise, module port preambles) before scan."""
     cb.squeezed_text = squeeze_for_dependency_scan(cb.source_text)
 
 

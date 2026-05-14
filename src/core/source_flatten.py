@@ -11,11 +11,11 @@ from api.resolve.verilog_text import (
 )
 from verilog_text.preproc import PreprocDirectiveParser
 from verilog_text.scan import scan_verilog_body
+from verilog_text.scan_trace import build_instance_scan_trace
 from verilog_text.squeeze import (
-    drop_alwaysish_blocks,
     join_continued_lines,
     squeeze_for_dependency_scan,
-    strip_comments_preserve_strings,
+    squeeze_pipeline_for_dependency_scan,
 )
 
 _INCLUDE = re.compile(r"^\s*`include\s+(?:\"([^\"]+)\"|<([^>]+)>)\s*(//.*)?$")
@@ -94,12 +94,20 @@ def extract_dependencies_from_file(
     if ctx is not None:
         dbg = getattr(ctx, "dependency_debug_dump", None)
         if dbg is not None:
-            stripped = strip_comments_preserve_strings(flat)
-            dbg.write_text(path, "03a_strip_comments.txt", stripped)
-            dbg.write_text(path, "03b_drop_alwaysish.txt", drop_alwaysish_blocks(stripped))
+            stages = squeeze_pipeline_for_dependency_scan(flat)
+            dbg.write_text(path, "03a_strip_comments.txt", stages[0])
+            dbg.write_text(path, "03b_drop_alwaysish.txt", stages[1])
+            dbg.write_text(path, "03c_strip_decl_noise.txt", stages[2])
+            dbg.write_text(path, "03d_strip_module_ports.txt", stages[3])
+            dbg.write_text(path, "03e_scan_input.txt", stages[4])
+            dbg.write_text(
+                path,
+                "05_instance_scan_trace.txt",
+                build_instance_scan_trace(stages[4]),
+            )
         squ = ctx.fire(SqueezeForDependencyScanAPI, source_text=flat).squeezed_text
         if dbg is not None:
-            dbg.write_text(path, "03c_squeeze_full.txt", squ)
+            assert squ == stages[4]
         r = ctx.fire(ScanVerilogForDependenciesAPI, scanned_text=squ)
         if dbg is not None:
             dbg.write_text(

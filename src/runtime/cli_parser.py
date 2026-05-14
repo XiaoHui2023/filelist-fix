@@ -88,7 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="FILE",
         dest="log_file",
-        help="Log file. Omit for no file logging (debug hooks only).",
+        help=(
+            "Log file at DEBUG; file is truncated each run (no append). "
+            "Lines have no date/time prefix. "
+            "Lists (defines, refs, includes) are written as indented blocks. "
+            "Omit for no file logging (debug hooks only)."
+        ),
     )
     p.add_argument(
         "--debug-dump",
@@ -96,6 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="DIR",
         dest="debug_dump",
-        help="Write per-source dependency pipeline stages under DIR (README.txt explains). No relation to -l.",
+        help=(
+            "Write per-source dependency pipeline under DIR/by_file. "
+            "by_file/ is removed and recreated each run (only this run's outputs). "
+            "Root README.txt only; no timestamp sidecars. See README. "
+            "No relation to -l."
+        ),
     )
     return p

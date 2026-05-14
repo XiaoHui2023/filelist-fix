@@ -26,6 +26,7 @@ from core.fd_search import FdModuleSearch
 from core.filelist_prelude import PreludeOutcome, load_prelude_files
 from core.rg_search import RgModuleSearch
 from core.source_flatten import extract_dependencies_from_file
+from runtime.log_format import lines_block
 
 
 def _fire_closure_progress(
@@ -176,10 +177,10 @@ class FilelistApplication:
         log = getattr(ctx, "logger", None)
         if log is not None and log.isEnabledFor(logging.DEBUG):
             log.debug(
-                "prelude loaded: paths=%s define_keys=%s incdirs=%s",
-                [str(p) for p in self._prelude_paths],
-                sorted(st.defines.keys()),
-                [str(p) for p in st.incdirs],
+                "prelude loaded\n%s\n%s\n%s",
+                lines_block("paths", [str(p) for p in self._prelude_paths]),
+                lines_block("define_keys", sorted(st.defines.keys())),
+                lines_block("incdirs", [str(p) for p in st.incdirs]),
             )
 
         q: deque[str] = deque(self._tops)
@@ -244,10 +245,10 @@ class FilelistApplication:
                         )
                     if log is not None and log.isEnabledFor(logging.DEBUG):
                         log.debug(
-                            "reuse parsed file %s for module %r; defined=%s",
+                            "reuse parsed file %s for module %r\n%s",
                             hit,
                             mod,
-                            defs,
+                            lines_block("defined", defs),
                         )
                     for d in defs:
                         st.module_to_file.setdefault(d, hit)
@@ -276,12 +277,12 @@ class FilelistApplication:
 
                 if log is not None and log.isEnabledFor(logging.DEBUG):
                     log.debug(
-                        "parsed %s: cache=%s defined=%s referenced=%s includes=%s",
+                        "parsed %s (cache=%s)\n%s\n%s\n%s",
                         hit,
                         cache_hit,
-                        defs,
-                        refs,
-                        incs,
+                        lines_block("defined", defs),
+                        lines_block("referenced", refs),
+                        lines_block("includes", incs),
                     )
 
                 ctx.fire(

@@ -123,39 +123,52 @@ def _skip_balanced_parens(s: str, i: int) -> int:
     return i
 
 
-def _parse_module_instantiation(line: str, self_mod: str) -> str | None:
-    """若本行像模块例化则返回被例化模块类型名，否则返回 None。"""
+def parse_instance_line_analysis(line: str, self_mod: str) -> tuple[str | None, str]:
+    """判断一行是否像模块例化；返回 (模块类型名或 None, 人类可读原因)。"""
+
     raw = line.strip()
-    if not raw or raw.startswith("`") or raw.startswith("//"):
-        return None
+    if not raw:
+        return None, "空行或仅空白"
+    if raw.startswith("`"):
+        return None, "预处理指令行（不以例化解析）"
+    if raw.startswith("//"):
+        return None, "行注释残留（不应出现）"
     if raw.startswith("bind "):
-        return None
+        return None, "bind 行由单独规则处理"
     m_head = re.match(r"^([A-Za-z_]\w*)\b\s*", raw)
     if not m_head:
-        return None
+        return None, "行首不是标识符（不像 modtype …）"
     t = m_head.group(1)
-    if t in _kw or t == self_mod:
-        return None
+    if t in _kw:
+        return None, f"首标识符为关键字或内建门名 {t!r}，不当作模块类型"
+    if t == self_mod:
+        return None, f"首标识符与当前 module 名相同 {t!r}（避免自指）"
     i = _consume_h_ws(raw, m_head.end())
     if i < len(raw) and raw[i] == "#":
         i += 1
         i = _consume_h_ws(raw, i)
         if i >= len(raw) or raw[i] != "(":
-            return None
+            return None, "见 # 但后续不是 #( 形参列表，不像例化"
         i = _skip_balanced_parens(raw, i)
         i = _consume_h_ws(raw, i)
     if i < len(raw) and raw[i] == "(":
         i = _skip_balanced_parens(raw, i)
         i = _consume_h_ws(raw, i)
         if i < len(raw) and raw[i] == ";":
-            return t
-        return None
+            return t, "匿名例化：modtype [#(…)] ( … );"
+        return None, "括号后未以分号结束（可能是调用/表达式，不是例化）"
     m_inst = re.match(r"^([A-Za-z_]\w*)\b\s*\(", raw[i:])
     if not m_inst:
-        return None
+        return None, "#(…) 后无「实例名 (」形态，不像命名例化"
     inst = m_inst.group(1)
     if inst in _kw:
-        return None
+        return None, f"实例名位置为关键字 {inst!r}"
+    return t, f"命名例化：modtype [#(…)] {inst} ( … );"
+
+
+def _parse_module_instantiation(line: str, self_mod: str) -> str | None:
+    """若本行像模块例化则返回被例化模块类型名，否则返回 None。"""
+    t, _ = parse_instance_line_analysis(line, self_mod)
     return t
 
 

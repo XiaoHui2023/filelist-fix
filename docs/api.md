@@ -64,7 +64,7 @@
 ### SqueezeForDependencyScanAPI
 
 - **调用时机**：文本按宏与 include 展平后、扫描模块名引用之前
-- **说明**：注释与过程块等整段 squeeze
+- **说明**：去注释与过程块；再按行弱化 assign / wire / parameter 等声明，并去掉各 module 体内的端口头，再交给扫描
 
 ### StripVerilogCommentsAPI
 
