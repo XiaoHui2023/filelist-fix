@@ -32,7 +32,7 @@ def test_ifdef_filters_inactive_branch() -> None:
 def test_prelude_defines(tmp_path: Path) -> None:
     f = tmp_path / "p.f"
     f.write_text(f'+define+FOO=1\n+incdir+"{tmp_path}"\n', encoding="utf-8")
-    out = load_prelude_files([f])
+    out = load_prelude_files([f], output_path=tmp_path / "out.f")
     assert "FOO" in out.defines
 
 
@@ -43,6 +43,6 @@ def test_prelude_relative_incdir(tmp_path: Path) -> None:
     tgt.mkdir()
     prelude = here / "pre.f"
     prelude.write_text('+incdir+"../inc_here"\n', encoding="utf-8")
-    out = load_prelude_files([prelude])
+    out = load_prelude_files([prelude], output_path=tmp_path / "out.f")
     assert len(out.incdirs) == 1
     assert out.incdirs[0] == tgt.resolve()

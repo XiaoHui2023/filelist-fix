@@ -32,6 +32,7 @@ _ANCHOR_BEFORE_INSTANCE = frozenset(
         "initial",
         "specify",
         "endspecify",
+        "endmodule",
     }
 )
 _ID_HEAD = re.compile(r"([A-Za-z_]\w*)\b")
@@ -40,6 +41,11 @@ _MODULE_HEAD = re.compile(
     r"(?m)^\s*module\s+(?:automatic\s+)?([A-Za-z_]\w*)\b",
 )
 _ENDMODULE = re.compile(r"(?m)^\s*endmodule\b")
+# 行首配对：支持 ``macromodule`` / ``module`` 与嵌套 ``endmodule``（不依赖「首个 endmodule」启发式）。
+_MODULE_LINE = re.compile(
+    r"^\s*(?:macromodule\s+|module\s+(?:automatic\s+)?)([A-Za-z_]\w*)\b",
+)
+_ENDMODULE_LINE = re.compile(r"^\s*endmodule\b")
 _INCLUDE = re.compile(r"^\s*`include\s+(?:\"([^\"]+)\"|<([^>]+)>)\s*$")
 _kw = frozenset(
     {
@@ -168,6 +174,12 @@ _PRIMITIVE_GATE_TYPES = frozenset(
         "supply1",
     }
 )
+_PRIMITIVE_GATE_TYPES_LOWER = frozenset(x.lower() for x in _PRIMITIVE_GATE_TYPES)
+
+
+def _is_primitive_gate_type(t: str) -> bool:
+    """IEEE 1364 内建门类型名（不区分大小写，避免 ``NOT`` 等误入闭包）。"""
+    return t.lower() in _PRIMITIVE_GATE_TYPES_LOWER
 
 
 def _type_allowed_as_instantiation_base(t: str, self_mod: str) -> bool:
@@ -176,12 +188,12 @@ def _type_allowed_as_instantiation_base(t: str, self_mod: str) -> bool:
         return False
     if t not in _kw:
         return True
-    return t in _PRIMITIVE_GATE_TYPES
+    return _is_primitive_gate_type(t)
 
 
 def _identifier_allowed_as_instance_name(ident: str) -> bool:
     """例化名位置：允许内建门名作为标识（如 ``and and (…)``），仍拒绝 ``if``/``while`` 等。"""
-    return ident not in _kw or ident in _PRIMITIVE_GATE_TYPES
+    return ident not in _kw or _is_primitive_gate_type(ident)
 
 
 def _consume_h_ws(s: str, i: int) -> int:
@@ -310,7 +322,7 @@ def _collect_instance_refs_span_scan(body: str, self_mod: str, refs: list[str]) 
         if _at_instance_scan_anchor(body, pos):
             hit = _try_parse_module_instantiation_span(body, pos, self_mod)
             if hit:
-                if hit.mod_type not in _PRIMITIVE_GATE_TYPES:
+                if not _is_primitive_gate_type(hit.mod_type):
                     refs.append(hit.mod_type)
                 pos = hit.end
                 continue
@@ -341,6 +353,14 @@ def skeletonize_body_instance_ports(body: str, self_mod: str) -> str:
 
 def skeletonize_scanned_verilog_for_dependency_scan(text: str) -> str:
     """按 module…endmodule 分段，对各段体内做 ``skeletonize_body_instance_ports``。"""
+    spans = _module_body_spans_by_stack(text)
+    if spans is not None:
+        out = text
+        for name, lo, hi in sorted(spans, key=lambda t: t[1], reverse=True):
+            chunk = out[lo:hi]
+            repl = skeletonize_body_instance_ports(chunk, name)
+            out = out[:lo] + repl + out[hi:]
+        return out
     pieces: list[str] = []
     pos = 0
     while True:
@@ -379,7 +399,7 @@ def parse_instance_line_analysis(line: str, self_mod: str) -> tuple[str | None, 
     if not m_head:
         return None, "行首不是标识符（不像 modtype …）"
     t = m_head.group(1)
-    if t in _kw and t not in _PRIMITIVE_GATE_TYPES:
+    if t in _kw and not _is_primitive_gate_type(t):
         return None, f"首标识符为关键字 {t!r}，不当作模块/原语例化类型"
     if t == self_mod:
         return None, f"首标识符与当前 module 名相同 {t!r}（避免自指）"
@@ -395,7 +415,7 @@ def parse_instance_line_analysis(line: str, self_mod: str) -> tuple[str | None, 
         i = _skip_balanced_parens(raw, i)
         i = _consume_h_ws(raw, i)
         if i < len(raw) and raw[i] == ";":
-            if t in _PRIMITIVE_GATE_TYPES:
+            if _is_primitive_gate_type(t):
                 return t, "内建门匿名例化：modtype [#(…)] ( … );"
             return t, "匿名例化：modtype [#(…)] ( … );"
         return None, "括号后未以分号结束（可能是调用/表达式，不是例化）"
@@ -405,7 +425,7 @@ def parse_instance_line_analysis(line: str, self_mod: str) -> tuple[str | None, 
     inst = m_inst.group(1)
     if not _identifier_allowed_as_instance_name(inst):
         return None, f"实例名位置为关键字 {inst!r}"
-    if t in _PRIMITIVE_GATE_TYPES:
+    if _is_primitive_gate_type(t):
         return t, f"内建门命名例化：{t!r} {inst} ( … );"
     return t, f"命名例化：modtype [#(…)] {inst} ( … );"
 
@@ -425,7 +445,7 @@ def _parse_bind_line(line: str) -> str | None:
     if not m:
         return None
     mod_type = m.group(2)
-    if mod_type in _kw and mod_type not in _PRIMITIVE_GATE_TYPES:
+    if mod_type in _kw and not _is_primitive_gate_type(mod_type):
         return None
     i = _consume_h_ws(s, m.end())
     if i < len(s) and s[i] == "#":
@@ -440,9 +460,61 @@ def _parse_bind_line(line: str) -> str | None:
         return None
     if not _identifier_allowed_as_instance_name(m2.group(1)):
         return None
-    if mod_type in _PRIMITIVE_GATE_TYPES:
+    if _is_primitive_gate_type(mod_type):
         return None
     return mod_type
+
+
+def _split_module_regions_by_stack(text: str) -> list[tuple[str, str]] | None:
+    """按行栈配对 ``module``/``macromodule`` 与 ``endmodule``，返回 ``(模块名, 体内文本)`` 列表。
+
+    若 ``endmodule`` 不平衡则返回 ``None``，由调用方回退到旧启发式。
+    """
+    lines = text.splitlines(True)
+    stack: list[tuple[str, int]] = []
+    regions: list[tuple[str, str]] = []
+    for i, line in enumerate(lines):
+        if _ENDMODULE_LINE.match(line):
+            if not stack:
+                continue
+            name, start = stack.pop()
+            body = "".join(lines[start:i])
+            regions.append((name, body))
+            continue
+        mm = _MODULE_LINE.match(line)
+        if mm:
+            stack.append((mm.group(1), i + 1))
+    if stack:
+        return None
+    return regions
+
+
+def _module_body_spans_by_stack(text: str) -> list[tuple[str, int, int]] | None:
+    """与 ``_split_module_regions_by_stack`` 相同配对规则，返回 ``(模块名, body_start, body_end)`` 字符下标。"""
+    lines = text.splitlines(True)
+    offsets: list[int] = []
+    o = 0
+    for ln in lines:
+        offsets.append(o)
+        o += len(ln)
+    stack: list[tuple[str, int]] = []
+    spans: list[tuple[str, int, int]] = []
+    for i, line in enumerate(lines):
+        if _ENDMODULE_LINE.match(line):
+            if not stack:
+                continue
+            name, body_start = stack.pop()
+            body_end = offsets[i]
+            spans.append((name, body_start, body_end))
+            continue
+        mm = _MODULE_LINE.match(line)
+        if mm:
+            nxt = i + 1
+            body_start = offsets[nxt] if nxt < len(lines) else offsets[i] + len(line)
+            stack.append((mm.group(1), body_start))
+    if stack:
+        return None
+    return spans
 
 
 @dataclass
@@ -463,29 +535,40 @@ def _collect_refs_from_body(body: str, self_mod: str, refs: list[str]) -> None:
 def scan_verilog_body(text: str) -> VerilogSliceScan:
     """从已通过条件编译筛选且压缩过的文本中抽取模块名、实例与 include。
 
-    对每个 ``module`` … ``endmodule`` 的体内文本分别做例化/bind 扫描；无成对 ``module`` 时对整段文本退化扫描。
-    内建门原语（``and``/``nand``/``buf`` 等）按例化解析并参与端口骨架化，但**不**写入 ``referenced_modules``。
+    对每个 ``module`` … ``endmodule`` 的体内文本分别做例化/bind 扫描（**栈配对**以支持同文件多模块与嵌套）；
+    若行级配对失败则回退到「首个 ``endmodule``」启发式。无成对 ``module`` 时对整段文本退化扫描。
+    内建门原语（``and``/``nand``/``buf`` 等，**大小写不敏感**）按例化解析并参与端口骨架化，但**不**写入 ``referenced_modules``。
     """
     defs: list[str] = []
     refs: list[str] = []
     incs: list[str] = []
-    pos = 0
-    while True:
-        mh = _MODULE_HEAD.search(text, pos)
-        if not mh:
-            break
-        end = _ENDMODULE.search(text, mh.end())
-        if not end:
-            break
-        name = mh.group(1)
-        defs.append(name)
-        body = text[mh.end() : end.start()]
-        for im in _INCLUDE.finditer(body):
-            p = im.group(1) or im.group(2) or ""
-            if p:
-                incs.append(p.strip())
-        _collect_refs_from_body(body, name, refs)
-        pos = end.end()
+    stacked = _split_module_regions_by_stack(text)
+    if stacked is not None:
+        for name, body in stacked:
+            defs.append(name)
+            for im in _INCLUDE.finditer(body):
+                p = im.group(1) or im.group(2) or ""
+                if p:
+                    incs.append(p.strip())
+            _collect_refs_from_body(body, name, refs)
+    else:
+        pos = 0
+        while True:
+            mh = _MODULE_HEAD.search(text, pos)
+            if not mh:
+                break
+            end = _ENDMODULE.search(text, mh.end())
+            if not end:
+                break
+            name = mh.group(1)
+            defs.append(name)
+            body = text[mh.end() : end.start()]
+            for im in _INCLUDE.finditer(body):
+                p = im.group(1) or im.group(2) or ""
+                if p:
+                    incs.append(p.strip())
+            _collect_refs_from_body(body, name, refs)
+            pos = end.end()
     for line in text.splitlines():
         bh = _parse_bind_line(line)
         if bh:

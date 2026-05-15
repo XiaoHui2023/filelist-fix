@@ -23,7 +23,11 @@ from core.bin_resolve import ToolBinaryLocator, normalize_search_roots
 from core.filelist_paths import format_listed_path
 from core.dep_order import prerequisite_edges, topo_prereq_first
 from core.fd_search import FdModuleSearch
-from core.filelist_prelude import PreludeOutcome, load_prelude_files
+from core.filelist_prelude import (
+    PreludeOutcome,
+    load_prelude_files_with_signature,
+    prelude_signature_from_files,
+)
 from core.rg_search import RgModuleSearch
 from core.source_flatten import extract_dependencies_from_file
 from runtime.log_format import lines_block
@@ -121,7 +125,7 @@ class FilelistApplication:
         self._output = output_path
         self._path_absolute = path_style == "absolute"
         self._ctx = ctx
-        self._save = FileParseArchive(save_path) if save_path else FileParseArchive(None)
+        self._save_path = save_path
         self._tools = ModuleResolveTools(
             loc.resolve_fd(),
             loc.resolve_rg(),
@@ -156,14 +160,23 @@ class FilelistApplication:
     def run(self) -> ResolvedBuild:
         """收集依赖闭包、排序并发事件；写出 filelist 与解析复用释放由 impl 消费。"""
         ctx = self._ctx
-        ctx.save = self._save
         try:
             return self._run_orchestration(ctx)
         finally:
             ctx.fire(OnSessionEndAPI)
 
     def _run_orchestration(self, ctx: Any) -> ResolvedBuild:
-        pre = load_prelude_files(self._prelude_paths) if self._prelude_paths else PreludeOutcome()
+        if self._prelude_paths:
+            pre, prelude_sig = load_prelude_files_with_signature(
+                self._prelude_paths,
+                output_path=self._output,
+                path_absolute=self._path_absolute,
+            )
+        else:
+            pre = PreludeOutcome()
+            prelude_sig = prelude_signature_from_files([])
+        self._save = FileParseArchive(self._save_path, prelude_signature=prelude_sig)
+        ctx.save = self._save
         ctx.fire(
             OnPreludeLoadedAPI,
             prelude_path_count=len(self._prelude_paths),
@@ -257,6 +270,7 @@ class FilelistApplication:
                         )
                     for d in defs:
                         st.module_to_file.setdefault(d, hit)
+                    st.module_to_file.setdefault(mod, hit)
                     continue
 
                 _fire_closure_progress(

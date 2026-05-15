@@ -77,8 +77,8 @@ def test_cli_writes_summary_to_stderr(tmp_path: Path) -> None:
         check=False,
     )
     assert proc.returncode == 0
-    assert out.is_file()
     body = out.read_text(encoding="utf-8")
+    assert "top_chip.v" in body
     lines = [Path(ln.strip()).as_posix() for ln in body.splitlines() if ln.strip()]
     assert any(ln.endswith("complex_rtl/top_chip.v") for ln in lines)
     assert proc.stdout.strip() == ""
@@ -116,5 +116,10 @@ def test_cli_absolute_path_style(tmp_path: Path) -> None:
     )
     assert proc.returncode == 0
     lines = [ln.strip() for ln in out.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    assert lines
-    assert all(Path(ln).is_absolute() for ln in lines)
+    path_lines = [
+        ln
+        for ln in lines
+        if not ln.startswith("+") and not ln.startswith("-") and not ln.startswith("`")
+    ]
+    assert path_lines
+    assert all(Path(ln).is_absolute() for ln in path_lines)
