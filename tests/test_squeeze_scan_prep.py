@@ -154,6 +154,47 @@ endmodule
     assert r.referenced_modules == ["ok_mod"]
 
 
+def test_always_begin_inner_case_endcase_nested() -> None:
+    """always → begin → case → begin/end 嵌套时整块丢弃，不外泄伪例化。"""
+    src = """
+module m;
+  reg clk;
+  always @(posedge clk) begin
+    case (1'b1)
+      1'b1: begin
+        ghost_in_case g ();
+      end
+      default: begin
+      end
+    endcase
+  end
+  real_mod u ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "ghost_in_case" not in r.referenced_modules
+    assert "real_mod" in r.referenced_modules
+
+
+def test_always_ff_case_without_begin_on_first_line() -> None:
+    """首行无 begin、第二行起 case…endcase 时仍能吞到 endcase 之后。"""
+    src = """
+module m;
+  reg clk;
+  always_ff @(posedge clk)
+  case (clk)
+    1'b0: ;
+    default: ;
+  endcase
+  leaf_mod x ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "leaf_mod" in r.referenced_modules
+
+
 def test_generate_nested_case_if_begin_stripped() -> None:
     """generate 内嵌 case / if-else / begin-end 仍整段去掉，不外扫例化。"""
     src = """
@@ -210,3 +251,20 @@ endmodule
     r = scan_verilog_body(squ)
     assert "ghost_a" not in r.referenced_modules
     assert "good_b" in r.referenced_modules
+
+
+def test_multiline_localparam_stripped() -> None:
+    src = """
+module m;
+  localparam  xxx = 1'd1,
+                    xxy = 2'd2,
+                   xxz = 3'd1;
+  leaf_mod u ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "xxx" not in r.referenced_modules
+    assert "xxy" not in r.referenced_modules
+    assert "xxz" not in r.referenced_modules
+    assert "leaf_mod" in r.referenced_modules

@@ -64,7 +64,7 @@
 ### SqueezeForDependencyScanAPI
 
 - **调用时机**：文本按宏与 include 展平后、扫描模块名引用之前
-- **说明**：按固定顺序整段压缩：去注释 → 去掉 **always**（含 **always_ff / always_comb / always_latch**）**initial**、**final**、**task**、**specify**、**generate…endgenerate** 等与例化无关的整块（**generate** 体内例化不计入依赖）→ 按行弱化声明与若干 `` ` `` 编译指令行 → 去掉各 **module** 端口头 → 例化端口骨架化，以缩短后续正则扫描文本
+- **说明**：按固定顺序整段压缩：去注释 → 去掉 **always**（含 **always_ff / always_comb / always_latch**）**initial**、**final**、**task**、**specify**、**generate…endgenerate** 等与例化无关的整块（**generate** 体内例化不计入依赖）→ 按行弱化声明（**parameter**/**localparam** 允许多行逗号续写至顶层分号）与若干 `` ` `` 编译指令行 → 去掉各 **module** 端口头 → 例化端口骨架化，以缩短后续正则扫描文本
 
 ### StripVerilogCommentsAPI
 

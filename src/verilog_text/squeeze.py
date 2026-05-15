@@ -28,6 +28,11 @@ _SIZED_LITERAL = re.compile(
 _STR_SQ = re.compile(r"'([^'\\]|\\.)*'")
 _BEGIN = re.compile(r"\bbegin\b")
 _END = re.compile(r"\bend\b")
+# case / endcase：与 begin/end 一起在 always 等过程块内配对。
+_CASE_LINE = re.compile(
+    r"^\s*(?:(?:unique|priority)\s+)?(?:randcase|casez|casex|case)\b",
+)
+_ENDCASE_LINE = re.compile(r"^\s*endcase\b")
 _TASK_HEAD = re.compile(
     r"^\s*(?:(?:pure\s+virtual|virtual|static|automatic)\s+)*task\b",
 )
@@ -69,7 +74,7 @@ def drop_alwaysish_blocks(src: str) -> str:
     """去掉与例化无关的过程性整块，减轻后续依赖扫描的正则工作量（启发式）。
 
     含 **always / always_ff / always_comb / always_latch**、**initial**、**final**（按
-    ``begin``/``end`` 或分号吞整块），以及 **task…endtask**、**extern task** 原型、
+    ``begin``/``end`` 与 ``case``/``endcase`` 嵌套计数吞整块；首行无 ``begin`` 时不再仅用首遇分号结束），以及 **task…endtask**、**extern task** 原型、
     **specify…endspecify**、**generate…endgenerate**（按 generate 嵌套深度整段丢弃，
     块内 case/if/begin 等不必单独解析）。**generate 体内的例化不再参与依赖抽取**。
     """
@@ -141,19 +146,7 @@ def drop_alwaysish_blocks(src: str) -> str:
             continue
 
         if trigger.match(line):
-            if _BEGIN.search(line):
-                depth = len(_BEGIN.findall(line)) - len(_END.findall(line))
-                i += 1
-                while i < n:
-                    depth += len(_BEGIN.findall(lines[i]))
-                    depth -= len(_END.findall(lines[i]))
-                    i += 1
-                    if depth <= 0:
-                        break
-            else:
-                while i < n and ";" not in lines[i]:
-                    i += 1
-                i += 1
+            i = _consume_always_initial_final_block(lines, i, n)
             continue
 
         if _TASK_HEAD.match(line):
@@ -176,12 +169,63 @@ def drop_alwaysish_blocks(src: str) -> str:
     return "".join(out)
 
 
+def _line_has_top_level_semicolon(s: str) -> bool:
+    """行内是否存在处于 ``()``/``[]``/``{}`` 最外层的分号（用于多行 parameter / 单行 always 结束判定）。"""
+    p = br = bc = 0
+    for ch in s:
+        if ch == "(":
+            p += 1
+        elif ch == ")":
+            if p > 0:
+                p -= 1
+        elif ch == "[":
+            br += 1
+        elif ch == "]":
+            if br > 0:
+                br -= 1
+        elif ch == "{":
+            bc += 1
+        elif ch == "}":
+            if bc > 0:
+                bc -= 1
+        elif ch == ";" and p == 0 and br == 0 and bc == 0:
+            return True
+    return False
+
+
+def _consume_always_initial_final_block(lines: list[str], start: int, n: int) -> int:
+    """从 ``always``/``initial``/``final`` 的 trigger 行起吞整块（``begin``/``end`` 与 ``case``/``endcase`` 嵌套）。"""
+    i = start
+    depth = 0
+    case_d = 0
+    saw_structure = False
+    while i < n:
+        cur = lines[i]
+        depth += len(_BEGIN.findall(cur)) - len(_END.findall(cur))
+        if _CASE_LINE.match(cur):
+            case_d += 1
+        if _ENDCASE_LINE.match(cur):
+            case_d -= 1
+        if depth > 0 or case_d > 0:
+            saw_structure = True
+        elif i > start and cur.strip():
+            saw_structure = True
+        i += 1
+        if i == start + 1 and _line_has_top_level_semicolon(lines[start]):
+            break
+        if depth <= 0 and case_d <= 0 and i > start + 1 and (saw_structure or cur.strip()):
+            break
+    return i
+
+
 _NOISE_LINE = re.compile(
-    r"^\s*(?:assign|localparam|localparameter|parameter|"
+    r"^\s*(?:assign|"
     r"input|output|inout|ref|"
     r"wire|trireg|tri[01]?|tri|wand|wor|reg|logic|bit|"
     r"int(?:eger)?|shortint|longint|byte|real|time)\b",
 )
+# localparam / parameter 可能跨多行逗号续写，见 strip_decl_noise_lines 专支。
+_PARAM_MULTILINE_HEAD = re.compile(r"^\s*(?:localparam|localparameter|parameter)\b")
 # 文件级或 module 体内的编译指令行；整行去掉以免时间单位名等干扰跨行例化扫描。
 _DIRECTIVE_NOISE_LINE = re.compile(
     r"^\s*`(?:timescale|celldefine|endcelldefine)\b",
@@ -189,7 +233,7 @@ _DIRECTIVE_NOISE_LINE = re.compile(
 
 
 def strip_decl_noise_lines(src: str) -> str:
-    """按行去掉 assign、parameter、port 方向（input/output/inout）、ref、wire/reg 等声明及若干编译指令行，减轻例化误匹配（启发式，单行）。"""
+    """按行去掉 assign、parameter/localparam（含多行逗号续写直至顶层分号）、port 方向等声明及若干编译指令行，减轻例化误匹配（启发式）。"""
 
     def _blank_line(line: str) -> str:
         if line.endswith("\r\n"):
@@ -198,12 +242,26 @@ def strip_decl_noise_lines(src: str) -> str:
             return "\n"
         return "\n"
 
+    lines = src.splitlines(keepends=True)
     out: list[str] = []
-    for line in src.splitlines(keepends=True):
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        if _PARAM_MULTILINE_HEAD.match(line):
+            while i < n:
+                cur = lines[i]
+                out.append(_blank_line(cur))
+                if _line_has_top_level_semicolon(cur):
+                    i += 1
+                    break
+                i += 1
+            continue
         if _NOISE_LINE.match(line) or _DIRECTIVE_NOISE_LINE.match(line):
             out.append(_blank_line(line))
         else:
             out.append(line)
+        i += 1
     return "".join(out)
 
 
