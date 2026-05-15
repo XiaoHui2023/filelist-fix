@@ -300,6 +300,60 @@ endmodule
     assert "leaf_mod" in r.referenced_modules
 
 
+def test_always_flat_if_else_if_chain_stripped() -> None:
+    """无外层 begin 时 if / else if / else 不得在第一分支 ``;`` 处截断。"""
+    src = """
+module m;
+  reg clk;
+  always @(posedge clk)
+    if (a) ghost_a ga ();
+    else if (b) ghost_b gb ();
+    else ghost_c gc ();
+  leaf_mod u ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "ghost_a" not in r.referenced_modules
+    assert "ghost_b" not in r.referenced_modules
+    assert "ghost_c" not in r.referenced_modules
+    assert "leaf_mod" in r.referenced_modules
+
+
+def test_always_flat_if_body_next_line_blank_then_stmt() -> None:
+    """if 条件行无 ``;``，经空行再接语句体，仍整块丢弃。"""
+    src = """
+module m;
+  reg clk;
+  always @(posedge clk)
+    if (a)
+
+      x <= 1'b0;
+  leaf_mod u ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "leaf_mod" in r.referenced_modules
+
+
+def test_always_fork_join_flat_stripped() -> None:
+    """无 begin 的 fork…join 不得在中间 ``;`` 处截断。"""
+    src = """
+module m;
+  always @(*)
+    fork
+      ghost_fork g ();
+    join
+  ok_mod x ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "ghost_fork" not in r.referenced_modules
+    assert "ok_mod" in r.referenced_modules
+
+
 def test_generate_nested_case_if_begin_stripped() -> None:
     """generate 内嵌 case / if-else / begin-end 仍整段去掉，不外扫例化。"""
     src = """

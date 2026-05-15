@@ -33,6 +33,11 @@ _CASE_LINE = re.compile(
     r"^\s*(?:(?:unique|priority)\s+)?(?:randcase|casez|casex|case)\b",
 )
 _ENDCASE_LINE = re.compile(r"^\s*endcase\b")
+# fork … join / join_any / join_none：无 begin 时也要吞整块，避免扁平语句在 join 前被截断。
+_FORK_LINE = re.compile(r"^\s*fork\b")
+_JOIN_LINE = re.compile(r"^\s*join(?:_any|_none)?\b")
+# if-else 链：扁平（无 begin/end 包裹）时不能仅在首条带 ``;`` 语句后结束，须前瞻 ``else``。
+_ELSE_CONTINUATION_HEAD = re.compile(r"^\s*else\b")
 _TASK_HEAD = re.compile(
     r"^\s*(?:(?:pure\s+virtual|virtual|static|automatic)\s+)*task\b",
 )
@@ -74,7 +79,7 @@ def drop_alwaysish_blocks(src: str) -> str:
     """去掉与例化无关的过程性整块，减轻后续依赖扫描的正则工作量（启发式）。
 
     含 **always / always_ff / always_comb / always_latch**、**initial**、**final**（按
-    ``begin``/``end`` 与 ``case``/``endcase`` 嵌套计数吞整块；首行无 ``begin`` 时不再仅用首遇分号结束），以及 **task…endtask**、**extern task** 原型、
+    ``begin``/``end``、``case``/``endcase``、``fork``/``join`` 嵌套计数吞整块；无 ``begin`` 的 **if / else if / else** 扁平链在遇顶层 ``;`` 后仍前瞻 **``else``** 续吞；首行无 ``begin`` 时不再仅用首遇分号结束），以及 **task…endtask**、**extern task** 原型、
     **specify…endspecify**、**generate…endgenerate**（按 generate 嵌套深度整段丢弃，
     块内 case/if/begin 等不必单独解析）。**generate 体内的例化不再参与依赖抽取**。
     """
@@ -169,6 +174,18 @@ def drop_alwaysish_blocks(src: str) -> str:
     return "".join(out)
 
 
+def _peek_else_continuation(lines: list[str], idx: int, n: int) -> bool:
+    """下一非空行是否仍以 ``else`` / ``else if`` 续接同一 if 链（中间可夹空行）。"""
+    j = idx
+    while j < n:
+        s = lines[j]
+        if not s.strip():
+            j += 1
+            continue
+        return bool(_ELSE_CONTINUATION_HEAD.match(s))
+    return False
+
+
 def _line_has_top_level_semicolon(s: str) -> bool:
     """行内是否存在处于 ``()``/``[]``/``{}`` 最外层的分号（用于多行 parameter / 单行 always 结束判定）。"""
     p = br = bc = 0
@@ -194,11 +211,13 @@ def _line_has_top_level_semicolon(s: str) -> bool:
 
 
 def _consume_always_initial_final_block(lines: list[str], start: int, n: int) -> int:
-    """从 ``always``/``initial``/``final`` 的 trigger 行起吞整块（``begin``/``end`` 与 ``case``/``endcase`` 嵌套）。"""
+    """从 ``always``/``initial``/``final`` 的 trigger 行起吞整块（``begin``/``end``、``case``/``endcase``、``fork``/``join``；扁平 if-else 链用 ``;`` + ``else`` 前瞻）。"""
     i = start
     depth = 0
     case_d = 0
+    fork_d = 0
     saw_structure = False
+    ever_in_structure = False
     while i < n:
         cur = lines[i]
         depth += len(_BEGIN.findall(cur)) - len(_END.findall(cur))
@@ -206,15 +225,29 @@ def _consume_always_initial_final_block(lines: list[str], start: int, n: int) ->
             case_d += 1
         if _ENDCASE_LINE.match(cur):
             case_d -= 1
-        if depth > 0 or case_d > 0:
+        if _FORK_LINE.match(cur):
+            fork_d += 1
+        if _JOIN_LINE.match(cur) and fork_d > 0:
+            fork_d -= 1
+        in_structure = depth > 0 or case_d > 0 or fork_d > 0
+        if in_structure:
+            ever_in_structure = True
             saw_structure = True
         elif i > start and cur.strip():
             saw_structure = True
         i += 1
         if i == start + 1 and _line_has_top_level_semicolon(lines[start]):
             break
-        if depth <= 0 and case_d <= 0 and i > start + 1 and (saw_structure or cur.strip()):
-            break
+        if depth <= 0 and case_d <= 0 and fork_d <= 0 and i > start + 1:
+            if not cur.strip():
+                continue
+            if ever_in_structure:
+                if saw_structure or cur.strip():
+                    break
+            elif _line_has_top_level_semicolon(cur) and not _peek_else_continuation(
+                lines, i, n
+            ):
+                break
     return i
 
 
