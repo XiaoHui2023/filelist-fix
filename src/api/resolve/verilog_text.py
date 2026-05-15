@@ -20,19 +20,22 @@ class StripVerilogCommentsAPI(BaseAPI):
 
 
 class DropAlwaysishBlocksAPI(BaseAPI):
-    """Strip always/initial/final style procedural blocks heuristically before regex scan."""
+    """Heuristically strip procedural blocks unrelated to instantiation (always family, task, specify, …)."""
 
     source_text: str = Field(description="Source text, typically already comment-stripped")
-    dropped_text: str = Field(default="", description="Output with procedural blocks removed")
+    dropped_text: str = Field(
+        default="",
+        description="Output with always/initial/final, task/endtask, specify/endspecify, etc. removed",
+    )
 
 
 class SqueezeForDependencyScanAPI(BaseAPI):
-    """Squeeze pipeline before module/instance regex scan (comments, procedural blocks, decl noise, module port preambles)."""
+    """Ordered squeeze pipeline before module/instance regex scan."""
 
     source_text: str = Field(description="Flattened active-branch source text")
     squeezed_text: str = Field(
         default="",
-        description="Text after comment strip, procedural drop, decl-noise line blanking, and per-module port header strip",
+        description="After comments, procedural-block drop, decl-noise blanking, port-header strip, and instance-port skeletonization",
     )
 
 

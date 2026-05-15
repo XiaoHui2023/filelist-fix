@@ -26,6 +26,13 @@ _SIZED_LITERAL = re.compile(
 _STR_SQ = re.compile(r"'([^'\\]|\\.)*'")
 _BEGIN = re.compile(r"\bbegin\b")
 _END = re.compile(r"\bend\b")
+_TASK_HEAD = re.compile(
+    r"^\s*(?:(?:pure\s+virtual|virtual|static|automatic)\s+)*task\b",
+)
+_ENDTASK_HEAD = re.compile(r"^\s*endtask\b")
+_EXTERN_TASK_HEAD = re.compile(r"^\s*extern\s+task\b")
+_SPECIFY_HEAD = re.compile(r"^\s*specify\b")
+_ENDSPECIFY_HEAD = re.compile(r"^\s*endspecify\b")
 
 
 def strip_comments_preserve_strings(src: str) -> str:
@@ -53,43 +60,115 @@ def strip_comments_preserve_strings(src: str) -> str:
 
 
 def drop_alwaysish_blocks(src: str) -> str:
-    """删除 always/initial/final 等过程块，降低后续依赖扫描的正则成本（启发式）。"""
+    """去掉与例化无关的过程性整块，减轻后续依赖扫描的正则工作量（启发式）。
+
+    含 **always / always_ff / always_comb / always_latch**、**initial**、**final**（按
+    ``begin``/``end`` 或分号吞整块），以及 **task…endtask**、**extern task** 原型、
+    **specify…endspecify**。这些块内的标识符不应参与模块例化推断。
+    """
     lines = src.splitlines(True)
     out: list[str] = []
     i = 0
     n = len(lines)
-    trigger = re.compile(r"^\s*(always(?:_ff|_comb)?|initial|final)\b")
+    trigger = re.compile(r"^\s*(always(?:_(?:ff|comb|latch))?|initial|final)\b")
+    task_depth = 0
+    specify_depth = 0
+
+    def skip_extern_task_proto(j: int) -> int:
+        """跳过 ``extern task`` 原型（无 ``endtask``），直到形参表闭合后的分号。"""
+        k = j
+        depth = 0
+        seen_lp = False
+        pending_semi = False
+        while k < n:
+            s = lines[k]
+            for ch in s:
+                if pending_semi:
+                    if ch == ";":
+                        return k + 1
+                elif ch == "(":
+                    depth += 1
+                    seen_lp = True
+                elif ch == ")":
+                    if depth > 0:
+                        depth -= 1
+                    if depth == 0 and seen_lp:
+                        pending_semi = True
+            if pending_semi and ";" in s:
+                return k + 1
+            if not seen_lp and ";" in s:
+                return k + 1
+            k += 1
+        return k
+
     while i < n:
         line = lines[i]
-        if not trigger.match(line):
-            out.append(line)
+
+        if task_depth > 0:
+            if _ENDTASK_HEAD.match(line):
+                task_depth -= 1
+            elif _TASK_HEAD.match(line):
+                task_depth += 1
             i += 1
             continue
-        if _BEGIN.search(line):
-            depth = len(_BEGIN.findall(line)) - len(_END.findall(line))
+
+        if specify_depth > 0:
+            if _ENDSPECIFY_HEAD.match(line):
+                specify_depth -= 1
+            elif _SPECIFY_HEAD.match(line):
+                specify_depth += 1
             i += 1
-            while i < n:
-                depth += len(_BEGIN.findall(lines[i]))
-                depth -= len(_END.findall(lines[i]))
+            continue
+
+        if _EXTERN_TASK_HEAD.match(line):
+            i = skip_extern_task_proto(i)
+            continue
+
+        if trigger.match(line):
+            if _BEGIN.search(line):
+                depth = len(_BEGIN.findall(line)) - len(_END.findall(line))
                 i += 1
-                if depth <= 0:
-                    break
-        else:
-            while i < n and ";" not in lines[i]:
+                while i < n:
+                    depth += len(_BEGIN.findall(lines[i]))
+                    depth -= len(_END.findall(lines[i]))
+                    i += 1
+                    if depth <= 0:
+                        break
+            else:
+                while i < n and ";" not in lines[i]:
+                    i += 1
                 i += 1
+            continue
+
+        if _TASK_HEAD.match(line):
+            task_depth = 1
             i += 1
+            continue
+
+        if _SPECIFY_HEAD.match(line):
+            specify_depth = 1
+            i += 1
+            continue
+
+        out.append(line)
+        i += 1
     return "".join(out)
 
 
 _NOISE_LINE = re.compile(
     r"^\s*(?:assign|localparam|localparameter|parameter|"
+    r"input|output|inout|ref|"
     r"wire|trireg|tri[01]?|tri|wand|wor|reg|logic|bit|"
     r"int(?:eger)?|shortint|longint|byte|real|time)\b",
+)
+# 文件级或 module 体内的编译指令行；整行去掉以免时间单位名等干扰跨行例化扫描。
+_DIRECTIVE_NOISE_LINE = re.compile(
+    r"^\s*`(?:timescale|celldefine|endcelldefine)\b",
 )
 
 
 def strip_decl_noise_lines(src: str) -> str:
-    """按行去掉 assign / localparam / wire 等声明，减轻例化行误匹配（启发式，单行）。"""
+    """按行去掉 assign、parameter、port 方向（input/output/inout）、ref、wire/reg 等声明及若干编译指令行，减轻例化误匹配（启发式，单行）。"""
 
     def _blank_line(line: str) -> str:
         if line.endswith("\r\n"):
@@ -100,7 +179,7 @@ def strip_decl_noise_lines(src: str) -> str:
 
     out: list[str] = []
     for line in src.splitlines(keepends=True):
-        if _NOISE_LINE.match(line):
+        if _NOISE_LINE.match(line) or _DIRECTIVE_NOISE_LINE.match(line):
             out.append(_blank_line(line))
         else:
             out.append(line)
@@ -160,9 +239,16 @@ def squeeze_pipeline_for_dependency_scan(
 ) -> tuple[str, str, str, str, str]:
     """与 ``squeeze_for_dependency_scan`` 相同的各步中间结果，供调试写出。
 
+    各步按顺序去掉「与例化无关」的噪声，使后续正则只在更短、更干净的文本上工作：
+
     Returns:
         (strip_comments, drop_alwaysish, strip_decl_noise, strip_module_ports, scan_input).
-        最后一项在 strip_module_ports 之后对例化最外层端口括弧内做空白化，再送入扫描。
+
+        #. **strip_comments**：注释与串内形状处理，避免误匹配。
+        #. **drop_alwaysish**：``always``/``initial``/``final``、``task``、``specify`` 等整块。
+        #. **strip_decl_noise**：assign、parameter、port 方向、wire、若干 `` ` `` 编译指令行。
+        #. **strip_module_ports**：各 module 体内去掉端口头。
+        #. **scan_input**：已识别例化的端口表内置空白，再送入 ``scan_verilog_body``。
     """
 
     a = strip_comments_preserve_strings(src)
@@ -174,7 +260,11 @@ def squeeze_pipeline_for_dependency_scan(
 
 
 def squeeze_for_dependency_scan(src: str) -> str:
-    """组合去注释、过程块、声明噪声、module 端口剥离与例化端口骨架化，得到依赖扫描输入。"""
+    """按固定顺序压缩文本，去掉与例化无关的干扰后再做端口剥离与例化端口骨架化。
+
+    顺序为：去注释 → 去过程块（含 **always** 全家与 task、specify 等）→ 声明/指令行
+    噪声 → module 端口头 → 端口表空白化；输出供 ``scan_verilog_body`` 使用。
+    """
     return squeeze_pipeline_for_dependency_scan(src)[-1]
 
 

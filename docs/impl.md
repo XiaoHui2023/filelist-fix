@@ -36,7 +36,7 @@
 
 ## resolve.verilog_text_resolve
 
-为依赖扫描准备单层源码的可读形态：在 **squeeze** 中依次弱化注释与过程块、assign/wire/parameter 等声明行、各 module 体内的端口头，再交给扫描；本节不写具体实现步骤。
+为依赖扫描准备单层源码的可读形态：在 **squeeze** 中按顺序弱化注释、**always** 等过程整块与 **task**/**specify** 等、assign/wire/parameter 等声明行、各 **module** 体内的端口头，再交给扫描；本节不写具体实现步骤。
 
 **对应 API**
 

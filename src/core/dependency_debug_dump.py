@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 from pathlib import Path
 
@@ -12,7 +13,7 @@ _README = """依赖解析调试输出（本目录由 --debug-dump 生成）
 
 ## 子目录名里末尾的十六进制串是什么
 
-`by_file/` 下每个子目录名为：`短文件名` + `_` + **16 位小写十六进制**。该串是 **SHA256（UTF-8 编码的源文件绝对路径）取前 16 个十六进制字符**，由路径唯一确定，**不是随机数、也不是日期**。用途：不同路径下若基名相同，仍能得到不同子目录。
+`by_file/` 下每个子目录通常名为**去掉扩展名后的短文件名**（非字母数字等字符会换成下划线，过长会截断）。**仅当**本轮解析中**多个不同源文件**在用过上述规则后会**同名**时，才在目录名末尾追加 `_` + **16 位小写十六进制**；该串是 **SHA256（UTF-8 编码的该源文件绝对路径）取前 16 个十六进制字符**，由路径唯一确定，**不是随机数、也不是日期**。用途：不同路径下若基名相同，仍能得到不同子目录。
 
 ## 重复生成与同一路径
 
@@ -24,15 +25,15 @@ _README = """依赖解析调试输出（本目录由 --debug-dump 生成）
 
 ## 单文件在 by_file 下的含义
 
-每个被解析的源文件对应一个子目录（命名规则见上）。
+每个被解析的源文件对应一个子目录（命名规则见上；无同名冲突时不带十六进制尾缀）。
 目录内各文件大致对应流水线顺序（与实现一致）：
 
 1. 00_source_path.txt — 该目录对应的源文件绝对路径。
 2. 01_joined.txt — 读盘后做反斜杠续行折叠的结果（尚未跑 ifdef 等预处理行）。
 3. 02_flatten_merged.txt — 在当前宏与 ifdef 活动分支下，本文件行与已展开 include 子树拼成的一段文本（递归时每个物理文件各有一份目录）。
 4. 03a_strip_comments.txt — 去掉 // 与块注释、尽量保留串内形状后的文本。
-5. 03b_drop_alwaysish.txt — 再删掉 always / initial / final 等过程块（启发式）。
-6. 03c_strip_decl_noise.txt — 按行去掉 assign、localparam、parameter、wire/reg/logic 等声明行（启发式，减轻误匹配）。
+5. 03b_drop_alwaysish.txt — 再删掉 **always / always_ff / always_comb / always_latch**、**initial**、**final** 等过程块，以及 **task…endtask**、**extern task** 原型、**specify…endspecify**（启发式；与例化无关的整块先行去掉以缩短后续扫描文本）。
+6. 03c_strip_decl_noise.txt — 按行去掉 assign、localparam、parameter、port 方向（input/output/inout）、ref、wire/reg/logic 等声明行，以及 `` `timescale``、`` `celldefine`` / `` `endcelldefine`` 等编译指令整行（启发式，减轻误匹配）。
 7. 03d_strip_module_ports.txt — 在每个 module…endmodule 体内去掉 #(…) 与端口表等 module 头尾残留。
 8. 03e_scan_input.txt — 在 **03d** 之后将**已识别例化**的最外层端口括弧内部换成空白（减轻误匹配、便于按行粗查），再送入 `scan_verilog_body`（与 `SqueezeForDependencyScanAPI` 输出一致）。
 9. 04_scan_result.txt — defined / referenced / include 列表摘要。
@@ -61,16 +62,95 @@ class DependencyDebugDump:
         if legacy.exists():
             legacy.unlink()
 
-    def _target_dir(self, source_path: Path) -> Path:
-        h = hashlib.sha256(str(source_path.resolve()).encode("utf-8")).hexdigest()[:16]
+        self._resolved_dir: dict[str, Path] = {}
+        self._stem_collided: set[str] = set()
+
+    @staticmethod
+    def _hash16(resolved: Path) -> str:
+        return hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _sanitize_stem(source_path: Path) -> str:
         stem = "".join(c if c.isalnum() or c in "._-" else "_" for c in source_path.stem)[:48]
-        d = self._root / "by_file" / f"{stem}_{h}"
-        d.mkdir(parents=True, exist_ok=True)
+        return stem if stem else "_"
+
+    @staticmethod
+    def _marker_same_source(marker_text: str, resolved: Path) -> bool:
+        t = marker_text.strip()
+        if t == str(resolved):
+            return True
+        if not t:
+            return True
+        prev = Path(t)
+        try:
+            prev_res = prev.resolve()
+        except OSError:
+            return True
+        try:
+            exists = prev_res.exists()
+        except OSError:
+            return True
+        if not exists:
+            return True
+        try:
+            return os.path.samefile(prev_res, resolved)
+        except OSError:
+            return False
+
+    def _target_dir(self, source_path: Path) -> Path:
+        resolved = source_path.resolve()
+        key = str(resolved)
+        hit = self._resolved_dir.get(key)
+        if hit is not None:
+            d = hit
+            (d / "00_source_path.txt").write_text(
+                str(resolved),
+                encoding="utf-8",
+                newline="\n",
+            )
+            return d
+
+        stem = self._sanitize_stem(source_path)
+        by_file = self._root / "by_file"
+
+        if stem in self._stem_collided:
+            d = by_file / f"{stem}_{self._hash16(resolved)}"
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "00_source_path.txt").write_text(
+                str(resolved),
+                encoding="utf-8",
+                newline="\n",
+            )
+            self._resolved_dir[key] = d
+            return d
+
+        plain = by_file / stem
+        if plain.is_dir():
+            marker = plain / "00_source_path.txt"
+            prev = marker.read_text(encoding="utf-8") if marker.is_file() else ""
+            if self._marker_same_source(prev, resolved):
+                d = plain
+            else:
+                self._stem_collided.add(stem)
+                old_txt = prev.strip()
+                old_res = Path(old_txt).resolve() if old_txt else resolved
+                hashed_old = by_file / f"{stem}_{self._hash16(old_res)}"
+                if hashed_old.exists():
+                    raise FileExistsError(f"debug dump rename target exists: {hashed_old}")
+                plain.rename(hashed_old)
+                self._resolved_dir[str(old_res)] = hashed_old
+                d = by_file / f"{stem}_{self._hash16(resolved)}"
+                d.mkdir(parents=True, exist_ok=True)
+        else:
+            d = plain
+            d.mkdir(parents=True, exist_ok=True)
+
         (d / "00_source_path.txt").write_text(
-            str(source_path.resolve()),
+            str(resolved),
             encoding="utf-8",
             newline="\n",
         )
+        self._resolved_dir[key] = d
         return d
 
     def write_text(self, source_path: Path, filename: str, text: str) -> None:

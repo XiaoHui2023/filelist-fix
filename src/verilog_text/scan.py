@@ -400,7 +400,10 @@ def _collect_refs_from_body(body: str, self_mod: str, refs: list[str]) -> None:
 
 
 def scan_verilog_body(text: str) -> VerilogSliceScan:
-    """从已通过条件编译筛选且压缩过的文本中抽取模块名、实例与 include。"""
+    """从已通过条件编译筛选且压缩过的文本中抽取模块名、实例与 include。
+
+    对每个 ``module`` … ``endmodule`` 的体内文本分别做例化/bind 扫描；无成对 ``module`` 时对整段文本退化扫描。
+    """
     defs: list[str] = []
     refs: list[str] = []
     incs: list[str] = []

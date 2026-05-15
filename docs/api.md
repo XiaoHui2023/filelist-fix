@@ -64,7 +64,7 @@
 ### SqueezeForDependencyScanAPI
 
 - **调用时机**：文本按宏与 include 展平后、扫描模块名引用之前
-- **说明**：去注释与过程块；再按行弱化 assign / wire / parameter 等声明，并去掉各 module 体内的端口头，再交给扫描
+- **说明**：按固定顺序整段压缩：去注释 → 去掉 **always**（含 **always_ff / always_comb / always_latch**）**initial**、**final**、**task**、**specify** 等与例化无关的整块 → 按行弱化声明与若干 `` ` `` 编译指令行 → 去掉各 **module** 端口头 → 例化端口骨架化，以缩短后续正则扫描文本
 
 ### StripVerilogCommentsAPI
 
@@ -72,4 +72,4 @@
 
 ### DropAlwaysishBlocksAPI
 
-- **说明**：同上
+- **说明**：去掉 **always** 全家、**initial**、**final**、**task…endtask**（含 **extern task** 原型）、**specify…endspecify** 等整块；输入一般为已去注释文本

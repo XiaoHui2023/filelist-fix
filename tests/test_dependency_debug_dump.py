@@ -37,8 +37,7 @@ def test_debug_dump_writes_pipeline_files(tmp_path: Path) -> None:
     assert "04_scan_result.txt" in names
     assert (dbg_root / "README.txt").is_file()
     assert not (dbg_root / "last_run.txt").exists()
-    suffix = subdirs[0].name.rsplit("_", 1)[-1]
-    assert len(suffix) == 16 and set(suffix) <= set("0123456789abcdef")
+    assert subdirs[0].name == "m"
     trace = (subdirs[0] / "05_instance_scan_trace.txt").read_text(encoding="utf-8")
     assert "MATCH" in trace
     assert "sub" in trace
@@ -68,6 +67,27 @@ def test_debug_dump_removes_legacy_last_run(tmp_path: Path) -> None:
     stale.write_text("utc_start: old\n", encoding="utf-8")
     DependencyDebugDump(dbg_root)
     assert not stale.exists()
+
+
+def test_debug_dump_same_basename_uses_hash_when_colliding(tmp_path: Path) -> None:
+    d1 = tmp_path / "a"
+    d2 = tmp_path / "b"
+    d1.mkdir()
+    d2.mkdir()
+    f1 = d1 / "dup.sv"
+    f2 = d2 / "dup.sv"
+    f1.write_text("module dup;\nendmodule\n", encoding="utf-8")
+    f2.write_text("module dup;\nendmodule\n", encoding="utf-8")
+    dbg_root = tmp_path / "dbg_dup"
+    ctx = AppContext(logger=None, console=None, dependency_debug_dump=DependencyDebugDump(dbg_root))
+    extract_dependencies_from_file(f1, [], {}, ctx=ctx)
+    extract_dependencies_from_file(f2, [], {}, ctx=ctx)
+    names = sorted(p.name for p in (dbg_root / "by_file").iterdir())
+    assert len(names) == 2
+    assert all(n.startswith("dup_") for n in names)
+    suffixes = [n.rsplit("_", 1)[-1] for n in names]
+    assert len(suffixes[0]) == 16 and set(suffixes[0]) <= set("0123456789abcdef")
+    assert suffixes[0] != suffixes[1]
 
 
 def test_debug_dump_00_source_path_overwrites_stale(tmp_path: Path) -> None:
