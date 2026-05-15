@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -14,7 +15,9 @@ class RgModuleSearch:
         self._rg = rg_exe
 
     def _pattern(self, module_name: str) -> str:
-        return rf"module\s+{module_name}\b"
+        # Verilog UDP 与用户模块例化同形；定义关键字为 ``primitive``，须与 ``module`` 一并检索。
+        esc = re.escape(module_name)
+        return rf"(?:module|primitive)\s+{esc}\b"
 
     def search(
         self,

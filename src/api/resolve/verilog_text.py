@@ -43,7 +43,10 @@ class ScanVerilogForDependenciesAPI(BaseAPI):
     """After squeeze: extract defined modules, referenced types, and `include strings."""
 
     scanned_text: str = Field(description="Squeezed flat source used for instance/module regex scan")
-    defined_modules: list[str] = Field(default_factory=list, description="module names defined in this fragment")
+    defined_modules: list[str] = Field(
+        default_factory=list,
+        description="本片段内定义的 module 名，以及 Verilog ``primitive``（UDP）名",
+    )
     referenced_modules: list[str] = Field(
         default_factory=list,
         description="实例与 bind 中出现的用户定义模块类型名（内建门原语不入列，不参与闭包解析）",

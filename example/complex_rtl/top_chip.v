@@ -29,6 +29,7 @@ module top_chip (
   nested_pyramid u_nested ();
   torture_ifdef_zoo u_ifdefz ();
   torture_primitives_gates u_gates ();
+  torture_udp_demo u_udp ();
   torture_hash_params u_thash ();
 
 endmodule

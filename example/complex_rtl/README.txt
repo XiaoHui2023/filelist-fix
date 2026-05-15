@@ -11,7 +11,7 @@ complex_rtl — 刻意复杂化的 Verilog/SystemVerilog 黄金样例
 
 用途：
 - 示范「多文件通过 `include` 拼成逻辑整文件」；
-- 覆盖 `ifdef/elsif/define/undef、celldefine、generate、层次实例化、单文件多 module（fd/rg 分工）`；**torture/torture_ifdef_zoo.v** 专门堆叠 **`ifndef` / `ifdef` / `elsif` / `else` 与嵌套 `ifndef`**（依赖 prelude 宏如 **WITH_DUAL**）；**torture/torture_primitives_gates.v** 堆叠 **IEEE 门级原语**（`not`/`buf`/`and`/…）与真实 **`torture_dep_a`** 例化，供依赖扫描排除原语；
+- 覆盖 `ifdef/elsif/define/undef、celldefine、generate、层次实例化、单文件多 module（fd/rg 分工）`；**torture/torture_ifdef_zoo.v** 专门堆叠 **`ifndef` / `ifdef` / `elsif` / `else` 与嵌套 `ifndef`**（依赖 prelude 宏如 **WITH_DUAL**）；**torture/torture_primitives_gates.v** 堆叠 **IEEE 门级原语**（`not`/`buf`/`and`/…）与真实 **`torture_dep_a`** 例化，供依赖扫描排除原语；**torture/torture_udp_demo.v** 含 **用户定义 `primitive`（UDP）** 与同文件 **module 例化**，供闭包与 rg 按 `primitive` 声明定位；
 - 作为 example 脚本与手工调试解析器的共同输入。
 - 块注释内请勿写 `` `ifdef`` 等预处理行：当前管线在剥离块注释前逐行解释指令，会被误读。
 

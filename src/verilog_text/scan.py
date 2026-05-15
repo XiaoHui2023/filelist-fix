@@ -46,6 +46,8 @@ _MODULE_LINE = re.compile(
     r"^\s*(?:macromodule\s+|module\s+(?:automatic\s+)?)([A-Za-z_]\w*)\b",
 )
 _ENDMODULE_LINE = re.compile(r"^\s*endmodule\b")
+# 用户定义原语（UDP）：与 module 不同关键字，例化形态与模块相同。
+_PRIMITIVE_DEF_HEAD = re.compile(r"(?m)^\s*primitive\s+([A-Za-z_]\w*)\b")
 _INCLUDE = re.compile(r"^\s*`include\s+(?:\"([^\"]+)\"|<([^>]+)>)\s*$")
 _kw = frozenset(
     {
@@ -109,6 +111,8 @@ _kw = frozenset(
         "pullup",
         "pulldown",
         "module",
+        "macromodule",
+        "primitive",
         "generate",
         "assign",
         "notif0",
@@ -538,6 +542,7 @@ def scan_verilog_body(text: str) -> VerilogSliceScan:
     对每个 ``module`` … ``endmodule`` 的体内文本分别做例化/bind 扫描（**栈配对**以支持同文件多模块与嵌套）；
     若行级配对失败则回退到「首个 ``endmodule``」启发式。无成对 ``module`` 时对整段文本退化扫描。
     内建门原语（``and``/``nand``/``buf`` 等，**大小写不敏感**）按例化解析并参与端口骨架化，但**不**写入 ``referenced_modules``。
+    用户定义 ``primitive``（UDP）名写入 ``defined_modules``，与 ``module`` 名一并参与闭包与索引。
     """
     defs: list[str] = []
     refs: list[str] = []
@@ -579,8 +584,10 @@ def scan_verilog_body(text: str) -> VerilogSliceScan:
             if p:
                 incs.append(p.strip())
         _collect_refs_from_body(text, "", refs)
+    prim_names = [m.group(1) for m in _PRIMITIVE_DEF_HEAD.finditer(text)]
+    defined = sorted(set(defs) | set(prim_names))
     return VerilogSliceScan(
-        defined_modules=sorted(set(defs)),
+        defined_modules=defined,
         referenced_modules=sorted(set(refs)),
         include_paths=sorted(set(incs)),
     )
