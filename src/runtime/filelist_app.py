@@ -64,7 +64,7 @@ class FilelistSessionState:
     _unresolved_seen: set[str] = field(default_factory=set, init=False, repr=False, compare=False)
 
     def note_unresolved(self, name: str) -> None:
-        """Record a module whose definition file was not found (ordered, deduplicated)."""
+        """未找到定义时记录一次；并将该名记入 ``_unresolved_seen``，本会话内不再 fd/rg、不再入队。"""
         if name not in self._unresolved_seen:
             self._unresolved_seen.add(name)
             self.unresolved_modules.append(name)
@@ -220,6 +220,11 @@ class FilelistApplication:
                             log.debug("skip module %r: already resolved via %s", mod, fp)
                     continue
 
+                if mod in st._unresolved_seen:
+                    if log is not None and log.isEnabledFor(logging.DEBUG):
+                        log.debug("skip module %r: fd/rg already missed this session", mod)
+                    continue
+
                 if log is not None and log.isEnabledFor(logging.DEBUG):
                     log.debug("search definition for module %r", mod)
 
@@ -298,7 +303,7 @@ class FilelistApplication:
                 st.file_refs[hit] = list(refs)
                 st.parsed_files.add(hit)
                 for r in refs:
-                    if r not in st.module_to_file:
+                    if r not in st.module_to_file and r not in st._unresolved_seen:
                         q.append(r)
                         if log is not None and log.isEnabledFor(logging.DEBUG):
                             log.debug("queue module %r (referenced from %s)", r, hit)

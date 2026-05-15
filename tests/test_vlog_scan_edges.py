@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from verilog_text.scan import _parse_module_instantiation, scan_verilog_body
-from verilog_text.squeeze import squeeze_for_dependency_scan
+from verilog_text.squeeze import squeeze_for_dependency_scan, strip_comments_preserve_strings
 
 
 def test_anonymous_and_named_instances() -> None:
@@ -17,6 +17,7 @@ endmodule
 
 
 def test_generate_block_instance() -> None:
+    """generate 体内例化被整段去掉；同模块在 generate 外的例化仍计入。"""
     src = """
 module gen_holder ();
   genvar i;
@@ -25,12 +26,12 @@ module gen_holder ();
       torture_dep_a c ();
     end
   endgenerate
+  torture_dep_b d ();
 endmodule
 """
     r = scan_verilog_body(squeeze_for_dependency_scan(src))
-    assert "torture_dep_a" in r.referenced_modules
-
-
+    assert "torture_dep_a" not in r.referenced_modules
+    assert "torture_dep_b" in r.referenced_modules
 def test_bind_line() -> None:
     src = """
 module mon ();
@@ -89,7 +90,7 @@ endmodule
 
 
 def test_sized_literals_d_h_in_param_hash() -> None:
-    """位宽进制字面量（如 5'ha、1'd1）中的单引号不得干扰 #() 括号配对。"""
+    """位宽进制字面量（如 5'ha、1'd1）中单引号经等长空白占位后不得干扰 #() 括号配对。"""
     src = """
 module m ();
   torture_param_leaf #(.W(5'ha), .D(1'd1)) u1 ();
@@ -98,6 +99,14 @@ endmodule
     r = scan_verilog_body(squeeze_for_dependency_scan(src))
     assert r.defined_modules == ["m"]
     assert set(r.referenced_modules) == {"torture_param_leaf"}
+
+
+def test_sized_literal_substitution_same_length() -> None:
+    """位宽字面量为等长替换，总长不变，避免被误认为「删空」。"""
+    src = "module m;\n  x #(.W(4'd1)) y();\nendmodule\n"
+    out = strip_comments_preserve_strings(src)
+    assert len(out) == len(src)
+    assert "4'd1" not in out
 
 
 def test_multiline_named_instance_and_params() -> None:

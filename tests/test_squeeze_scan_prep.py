@@ -152,3 +152,61 @@ endmodule
     r = scan_verilog_body(squ)
     assert "ok_mod" in r.referenced_modules
     assert r.referenced_modules == ["ok_mod"]
+
+
+def test_generate_nested_case_if_begin_stripped() -> None:
+    """generate 内嵌 case / if-else / begin-end 仍整段去掉，不外扫例化。"""
+    src = """
+module m;
+  generate
+    case (1)
+      1'b1: begin
+        if (1) begin
+          ghost_inst gi ();
+        end else if (0) begin
+        end else begin
+        end
+      end
+      default: begin
+      end
+    endcase
+  endgenerate
+  good_mod gm ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "ghost_inst" not in r.referenced_modules
+    assert "good_mod" in r.referenced_modules
+
+
+def test_nested_generate_stripped() -> None:
+    src = """
+module m;
+  generate
+    generate
+      deep_ghost dg ();
+    endgenerate
+  endgenerate
+  tail_mod t ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "deep_ghost" not in r.referenced_modules
+    assert "tail_mod" in r.referenced_modules
+
+
+def test_labelled_generate_stripped() -> None:
+    src = """
+module m;
+  outer_l : generate
+    ghost_a a ();
+  endgenerate
+  good_b b ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "ghost_a" not in r.referenced_modules
+    assert "good_b" in r.referenced_modules

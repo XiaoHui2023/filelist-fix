@@ -16,7 +16,7 @@ class OnPreludeLoadedAPI(BaseAPI):
 
 
 class OnModuleResolveMissAPI(BaseAPI):
-    """Emitted when fd/rg cannot locate a source file for a module name."""
+    """Emitted when fd/rg cannot locate a source file for a module name (at most once per name per run)."""
 
     module_name: str = Field(description="Module name queued for parsing but not found on disk")
 

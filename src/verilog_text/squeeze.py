@@ -13,8 +13,10 @@ from verilog_text.scan import (
 _BLOCK_COM = re.compile(r"/\*.*?\*/", re.DOTALL)
 _LINE_COM = re.compile(r"//.*?$", re.MULTILINE)
 _STR_DQ = re.compile(r'"([^"\\]|\\.)*"')
-# Verilog / SystemVerilog sized literals (e.g. 4'd1, 16'sh0, 5'ha) — must run
-# before _STR_SQ so a pair of literals is not misread as one '…' string.
+# Verilog / SystemVerilog sized literals (e.g. 4'd1, 16'sh0, 5'ha). Replaced with the
+# same-length run of spaces (not deleted) before _STR_SQ so adjacent literals are not
+# parsed as one '…' span; spaces keep token boundaries—do not use '_' here or
+# identifiers could merge (e.g. a_4'd1_b → a_____b as one token).
 _SIZED_LITERAL = re.compile(
     r"(?<![\w$])(?:\d+)?'[sS]?(?:"
     r"[bB][01_xzXZ?]+|"
@@ -33,13 +35,17 @@ _ENDTASK_HEAD = re.compile(r"^\s*endtask\b")
 _EXTERN_TASK_HEAD = re.compile(r"^\s*extern\s+task\b")
 _SPECIFY_HEAD = re.compile(r"^\s*specify\b")
 _ENDSPECIFY_HEAD = re.compile(r"^\s*endspecify\b")
+# 行首可选 ``label :``；块内 case/if/begin 等由整段丢弃覆盖，无需单独配对。
+_GENERATE_HEAD = re.compile(r"^\s*(?:[A-Za-z_]\w*\s*:\s*)?generate\b")
+_ENDGENERATE_HEAD = re.compile(r"^\s*endgenerate\b")
 
 
 def strip_comments_preserve_strings(src: str) -> str:
     """去掉块注释与行注释，尽量不把字符串里的 // 误判为注释。
 
-    双引号串先整体空白化；再空白化 Verilog/SV 位宽进制字面量（如 4'd1、5'ha），
-    以免后续对成对单引号的处理把相邻字面量误并成一段；最后处理成对单引号串。
+    双引号串先整体空白化；再将位宽进制字面量（如 **4'd1**、**5'ha**）替换为**等长空白**
+    （保留字符总数与括号配对，不是删空），以免下一步对成对单引号的处理把相邻字面量
+    误并成一段；最后处理成对单引号串。
     """
 
     def _blank_dq(m: re.Match[str]) -> str:
@@ -48,11 +54,11 @@ def strip_comments_preserve_strings(src: str) -> str:
     def _blank_sq(m: re.Match[str]) -> str:
         return "'" + " " * (len(m.group(0)) - 2) + "'"
 
-    def _blank_len(m: re.Match[str]) -> str:
+    def _blank_sized_literal(m: re.Match[str]) -> str:
         return " " * len(m.group(0))
 
     t = _STR_DQ.sub(_blank_dq, src)
-    t = _SIZED_LITERAL.sub(_blank_len, t)
+    t = _SIZED_LITERAL.sub(_blank_sized_literal, t)
     t = _STR_SQ.sub(_blank_sq, t)
     t = _BLOCK_COM.sub(lambda mm: " " * len(mm.group(0)), t)
     t = _LINE_COM.sub("", t)
@@ -64,7 +70,8 @@ def drop_alwaysish_blocks(src: str) -> str:
 
     含 **always / always_ff / always_comb / always_latch**、**initial**、**final**（按
     ``begin``/``end`` 或分号吞整块），以及 **task…endtask**、**extern task** 原型、
-    **specify…endspecify**。这些块内的标识符不应参与模块例化推断。
+    **specify…endspecify**、**generate…endgenerate**（按 generate 嵌套深度整段丢弃，
+    块内 case/if/begin 等不必单独解析）。**generate 体内的例化不再参与依赖抽取**。
     """
     lines = src.splitlines(True)
     out: list[str] = []
@@ -73,6 +80,7 @@ def drop_alwaysish_blocks(src: str) -> str:
     trigger = re.compile(r"^\s*(always(?:_(?:ff|comb|latch))?|initial|final)\b")
     task_depth = 0
     specify_depth = 0
+    generate_depth = 0
 
     def skip_extern_task_proto(j: int) -> int:
         """跳过 ``extern task`` 原型（无 ``endtask``），直到形参表闭合后的分号。"""
@@ -120,6 +128,14 @@ def drop_alwaysish_blocks(src: str) -> str:
             i += 1
             continue
 
+        if generate_depth > 0:
+            if _ENDGENERATE_HEAD.match(line):
+                generate_depth -= 1
+            elif _GENERATE_HEAD.match(line):
+                generate_depth += 1
+            i += 1
+            continue
+
         if _EXTERN_TASK_HEAD.match(line):
             i = skip_extern_task_proto(i)
             continue
@@ -147,6 +163,11 @@ def drop_alwaysish_blocks(src: str) -> str:
 
         if _SPECIFY_HEAD.match(line):
             specify_depth = 1
+            i += 1
+            continue
+
+        if _GENERATE_HEAD.match(line):
+            generate_depth = 1
             i += 1
             continue
 
@@ -245,7 +266,7 @@ def squeeze_pipeline_for_dependency_scan(
         (strip_comments, drop_alwaysish, strip_decl_noise, strip_module_ports, scan_input).
 
         #. **strip_comments**：注释与串内形状处理，避免误匹配。
-        #. **drop_alwaysish**：``always``/``initial``/``final``、``task``、``specify`` 等整块。
+        #. **drop_alwaysish**：``always``/``initial``/``final``、``task``、``specify``、``generate`` 等整块。
         #. **strip_decl_noise**：assign、parameter、port 方向、wire、若干 `` ` `` 编译指令行。
         #. **strip_module_ports**：各 module 体内去掉端口头。
         #. **scan_input**：已识别例化的端口表内置空白，再送入 ``scan_verilog_body``。
@@ -262,8 +283,8 @@ def squeeze_pipeline_for_dependency_scan(
 def squeeze_for_dependency_scan(src: str) -> str:
     """按固定顺序压缩文本，去掉与例化无关的干扰后再做端口剥离与例化端口骨架化。
 
-    顺序为：去注释 → 去过程块（含 **always** 全家与 task、specify 等）→ 声明/指令行
-    噪声 → module 端口头 → 端口表空白化；输出供 ``scan_verilog_body`` 使用。
+    顺序为：去注释 → 去过程块（含 **always** 全家、**task**、**specify**、**generate…endgenerate** 等；
+    **generate** 体内例化不再抽取）→ 声明/指令行噪声 → module 端口头 → 端口表空白化；输出供 ``scan_verilog_body`` 使用。
     """
     return squeeze_pipeline_for_dependency_scan(src)[-1]
 
