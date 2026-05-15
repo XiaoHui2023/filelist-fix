@@ -33,7 +33,7 @@ _README = """依赖解析调试输出（本目录由 --debug-dump 生成）
 3. 02_flatten_merged.txt — 在当前宏与 ifdef 活动分支下，本文件行与已展开 include 子树拼成的一段文本（递归时每个物理文件各有一份目录）。
 4. 03a_strip_comments.txt — 去掉 // 与块注释、尽量保留串内形状后的文本。
 5. 03b_drop_alwaysish.txt — 再删掉 **always / always_ff / always_comb / always_latch**、**initial**、**final** 等过程块，以及 **task…endtask**、**extern task** 原型、**specify…endspecify**、**generate…endgenerate**（启发式；与例化无关的整块先行去掉以缩短后续扫描文本；**generate 内例化不再参与依赖抽取**）。
-6. 03c_strip_decl_noise.txt — 按行去掉 **assign**（含**多行右值**直至行内顶层 ``;``）、port 方向（input/output/inout）、ref、wire/reg/logic 等声明行；**localparam / parameter / localparameter** 支持**多行逗号续写**直至行内顶层 ``;``；以及 `` `timescale``、`` `celldefine`` / `` `endcelldefine`` 等编译指令整行（启发式，减轻误匹配）。
+6. 03c_strip_decl_noise.txt — 弱化 **assign** 与 **wire/reg/logic** 等 net/变量声明（**可跨多行**直至行内顶层 ``;``）；**localparam / parameter / localparameter** 多行直至顶层 ``;``；**input/output/inout/ref** 仅**逐行**弱化（避免误吞 ``module ( … );`` 端口表）；以及 `` `timescale``、`` `celldefine`` / `` `endcelldefine`` 等编译指令整行（启发式，减轻误匹配）。
 7. 03d0_pre_strip_module_ports.txt — 与 **03c** 阶段文本相同，专作与下一步对照（进入各 module 体内端口头剥离前的快照）。
 8. 03d_strip_module_ports.txt — 在每个 module…endmodule 体内去掉实为 module 头的 ``#(…)`` 与端口表等残留；体首若为带 ``#(…)`` 的例化则保留，避免误剥。
 9. 03e_scan_input.txt — 在 **03d** 之后将**已识别例化**的最外层端口括弧内部换成空白（减轻误匹配、便于按行粗查），再送入 `scan_verilog_body`（与 `SqueezeForDependencyScanAPI` 输出一致）。

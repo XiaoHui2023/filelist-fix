@@ -43,6 +43,62 @@ endmodule
     assert "dep_mod" in r.referenced_modules
 
 
+def test_assign_rhs_split_immediately_after_equals() -> None:
+    """assign 在 ``=`` 后即换行，续行直至分号仍应整段弱化。"""
+    src = """
+module m;
+  assign xxx=
+ yyy;
+  leaf_mod u ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "yyy" not in r.referenced_modules
+    assert "leaf_mod" in r.referenced_modules
+
+
+def test_assign_keyword_then_rhs_on_next_lines() -> None:
+    src = """
+module m;
+  assign
+  xxx =
+    yyy;
+  leaf_mod u ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "leaf_mod" in r.referenced_modules
+
+
+def test_multiline_wire_declaration_stripped() -> None:
+    src = """
+module m;
+  wire a,
+       b;
+  leaf_mod u ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "leaf_mod" in r.referenced_modules
+
+
+def test_multiline_reg_declaration_stripped() -> None:
+    """module 体内 ``reg`` 位选换行时整段弱化（``output reg`` 多行仍不吞，以免与端口表混淆）。"""
+    src = """
+module m;
+  reg
+    [3:0] q;
+  leaf_mod u ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "leaf_mod" in r.referenced_modules
+
+
 def test_leading_parameterized_instance_body_not_stripped_as_module_header() -> None:
     """module 体首 ``#(…)`` 若为例化参数表（后接模块名而非端口表 ``(`` / ``;``），不得整段剥掉。"""
     src = """
@@ -54,6 +110,27 @@ endmodule
     r = scan_verilog_body(squ)
     assert r.defined_modules == ["top"]
     assert "sub" in r.referenced_modules
+
+
+def test_verilog_primitive_gate_recognized_not_in_refs() -> None:
+    """内建门按例化解析（trace/骨架化），但不进入 referenced_modules。"""
+    from verilog_text.scan import parse_instance_line_analysis
+
+    src = """
+module top;
+  and u1 (o, a, b);
+  pullup (pu_net);
+  leaf_mod x ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "leaf_mod" in r.referenced_modules
+    assert "and" not in r.referenced_modules and "pullup" not in r.referenced_modules
+    t1, w1 = parse_instance_line_analysis("  and u1 (o, a, b);", "top")
+    assert t1 == "and" and "内建门" in w1
+    t2, w2 = parse_instance_line_analysis("  pullup (pu_net);", "top")
+    assert t2 == "pullup" and "内建门" in w2
 
 
 def test_input_output_port_lines_stripped() -> None:

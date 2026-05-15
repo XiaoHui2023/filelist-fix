@@ -54,7 +54,7 @@
 ### ScanVerilogForDependenciesAPI
 
 - **调用时机**：与 `SqueezeForDependencyScanAPI` 同一步骤链上、紧接 squeeze 输出之后
-- **说明**：从已压缩文本解析出定义模块、引用模块与 include 路径串
+- **说明**：从已压缩文本解析出定义模块、引用模块（**内建门原语不入引用列表**）与 include 路径串
 
 ### JoinContinuedLinesAPI
 
@@ -64,7 +64,7 @@
 ### SqueezeForDependencyScanAPI
 
 - **调用时机**：文本按宏与 include 展平后、扫描模块名引用之前
-- **说明**：按固定顺序整段压缩：去注释 → 去掉 **always**（含 **always_ff / always_comb / always_latch**）**initial**、**final**、**task**、**specify**、**generate…endgenerate** 等与例化无关的整块（**generate** 体内例化不计入依赖）→ 按行弱化声明（**parameter**/**localparam** 允许多行逗号续写至顶层分号）与若干 `` ` `` 编译指令行 → 去掉各 **module** 端口头 → 例化端口骨架化，以缩短后续正则扫描文本
+- **说明**：按固定顺序整段压缩：去注释 → 去掉 **always**（含 **always_ff / always_comb / always_latch**）**initial**、**final**、**task**、**specify**、**generate…endgenerate** 等与例化无关的整块（**generate** 体内例化不计入依赖）→ 按行弱化声明（**parameter**/**localparam**、**assign** 与 **wire/reg/logic** 等可多行至顶层分号；**input/output** 端口表仍逐行弱化）与若干 `` ` `` 编译指令行 → 去掉各 **module** 端口头 → 例化端口骨架化，以缩短后续正则扫描文本
 
 ### StripVerilogCommentsAPI
 

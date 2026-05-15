@@ -46,7 +46,7 @@ class ScanVerilogForDependenciesAPI(BaseAPI):
     defined_modules: list[str] = Field(default_factory=list, description="module names defined in this fragment")
     referenced_modules: list[str] = Field(
         default_factory=list,
-        description="Referenced module/type names from instances and bind",
+        description="实例与 bind 中出现的用户定义模块类型名（内建门原语不入列，不参与闭包解析）",
     )
     include_paths: list[str] = Field(
         default_factory=list,

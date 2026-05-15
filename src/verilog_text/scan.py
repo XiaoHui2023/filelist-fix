@@ -129,6 +129,60 @@ _kw = frozenset(
     }
 )
 
+# IEEE 1364 内建门原语类型：与 ``_kw`` 中门名相交，但**允许**按 ``modtype [#(…)] [id] ( … );`` 参与例化解析
+#（骨架化端口、逐行 trace）；**不**写入 ``referenced_modules``，以免 filelist 闭包当作用户模块去解析。
+_PRIMITIVE_GATE_TYPES = frozenset(
+    {
+        "and",
+        "nand",
+        "or",
+        "nor",
+        "xor",
+        "xnor",
+        "buf",
+        "not",
+        "bufif0",
+        "bufif1",
+        "notif0",
+        "notif1",
+        "nmos",
+        "pmos",
+        "rnmos",
+        "rpmos",
+        "cmos",
+        "rcmos",
+        "tran",
+        "tranif0",
+        "tranif1",
+        "pullup",
+        "pulldown",
+        "tri",
+        "tri0",
+        "tri1",
+        "triand",
+        "trior",
+        "trireg",
+        "wand",
+        "wor",
+        "supply0",
+        "supply1",
+    }
+)
+
+
+def _type_allowed_as_instantiation_base(t: str, self_mod: str) -> bool:
+    """可作为例化首标识的模块/原语类型名（排除语句关键字与自指 module 名）。"""
+    if t == self_mod:
+        return False
+    if t not in _kw:
+        return True
+    return t in _PRIMITIVE_GATE_TYPES
+
+
+def _identifier_allowed_as_instance_name(ident: str) -> bool:
+    """例化名位置：允许内建门名作为标识（如 ``and and (…)``），仍拒绝 ``if``/``while`` 等。"""
+    return ident not in _kw or ident in _PRIMITIVE_GATE_TYPES
+
 
 def _consume_h_ws(s: str, i: int) -> int:
     """仅跳过水平空白，不把换行当空白吃掉（按行解析例化）。"""
@@ -212,7 +266,7 @@ def _try_parse_module_instantiation_span(s: str, pos: int, self_mod: str) -> _Mo
     if not m:
         return None
     t = m.group(1)
-    if t in _kw or t == self_mod:
+    if not _type_allowed_as_instantiation_base(t, self_mod):
         return None
     i = _skip_ws_any(s, m.end())
     if i < n and s[i] == "#":
@@ -234,7 +288,7 @@ def _try_parse_module_instantiation_span(s: str, pos: int, self_mod: str) -> _Mo
     if not m2:
         return None
     inst = m2.group(1)
-    if inst in _kw:
+    if not _identifier_allowed_as_instance_name(inst):
         return None
     i = _skip_ws_any(s, m2.end())
     if i >= n or s[i] != "(":
@@ -256,7 +310,8 @@ def _collect_instance_refs_span_scan(body: str, self_mod: str, refs: list[str]) 
         if _at_instance_scan_anchor(body, pos):
             hit = _try_parse_module_instantiation_span(body, pos, self_mod)
             if hit:
-                refs.append(hit.mod_type)
+                if hit.mod_type not in _PRIMITIVE_GATE_TYPES:
+                    refs.append(hit.mod_type)
                 pos = hit.end
                 continue
         pos += 1
@@ -324,8 +379,8 @@ def parse_instance_line_analysis(line: str, self_mod: str) -> tuple[str | None, 
     if not m_head:
         return None, "行首不是标识符（不像 modtype …）"
     t = m_head.group(1)
-    if t in _kw:
-        return None, f"首标识符为关键字或内建门名 {t!r}，不当作模块类型"
+    if t in _kw and t not in _PRIMITIVE_GATE_TYPES:
+        return None, f"首标识符为关键字 {t!r}，不当作模块/原语例化类型"
     if t == self_mod:
         return None, f"首标识符与当前 module 名相同 {t!r}（避免自指）"
     i = _consume_h_ws(raw, m_head.end())
@@ -340,14 +395,18 @@ def parse_instance_line_analysis(line: str, self_mod: str) -> tuple[str | None, 
         i = _skip_balanced_parens(raw, i)
         i = _consume_h_ws(raw, i)
         if i < len(raw) and raw[i] == ";":
+            if t in _PRIMITIVE_GATE_TYPES:
+                return t, "内建门匿名例化：modtype [#(…)] ( … );"
             return t, "匿名例化：modtype [#(…)] ( … );"
         return None, "括号后未以分号结束（可能是调用/表达式，不是例化）"
     m_inst = re.match(r"^([A-Za-z_]\w*)\b\s*\(", raw[i:])
     if not m_inst:
         return None, "#(…) 后无「实例名 (」形态，不像命名例化"
     inst = m_inst.group(1)
-    if inst in _kw:
+    if not _identifier_allowed_as_instance_name(inst):
         return None, f"实例名位置为关键字 {inst!r}"
+    if t in _PRIMITIVE_GATE_TYPES:
+        return t, f"内建门命名例化：{t!r} {inst} ( … );"
     return t, f"命名例化：modtype [#(…)] {inst} ( … );"
 
 
@@ -366,7 +425,7 @@ def _parse_bind_line(line: str) -> str | None:
     if not m:
         return None
     mod_type = m.group(2)
-    if mod_type in _kw:
+    if mod_type in _kw and mod_type not in _PRIMITIVE_GATE_TYPES:
         return None
     i = _consume_h_ws(s, m.end())
     if i < len(s) and s[i] == "#":
@@ -379,7 +438,9 @@ def _parse_bind_line(line: str) -> str | None:
     m2 = re.match(r"^([A-Za-z_]\w*)\b\s*\(", s[i:])
     if not m2:
         return None
-    if m2.group(1) in _kw:
+    if not _identifier_allowed_as_instance_name(m2.group(1)):
+        return None
+    if mod_type in _PRIMITIVE_GATE_TYPES:
         return None
     return mod_type
 
@@ -403,6 +464,7 @@ def scan_verilog_body(text: str) -> VerilogSliceScan:
     """从已通过条件编译筛选且压缩过的文本中抽取模块名、实例与 include。
 
     对每个 ``module`` … ``endmodule`` 的体内文本分别做例化/bind 扫描；无成对 ``module`` 时对整段文本退化扫描。
+    内建门原语（``and``/``nand``/``buf`` 等）按例化解析并参与端口骨架化，但**不**写入 ``referenced_modules``。
     """
     defs: list[str] = []
     refs: list[str] = []

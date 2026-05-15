@@ -1,5 +1,5 @@
 // Gate-level built-ins (IEEE 1364 primitives) mixed with a real module instance.
-// Scanner must not treat not/buf/and/... as user-defined modules to resolve.
+// 原语按例化解析（trace/端口骨架化），但不进入 referenced_modules；闭包只解析用户模块 torture_dep_a。
 module torture_primitives_gates ();
   wire a, b, c, y, z;
 
