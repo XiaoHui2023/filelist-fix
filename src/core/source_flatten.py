@@ -98,6 +98,7 @@ def extract_dependencies_from_file(
             dbg.write_text(path, "03a_strip_comments.txt", stages[0])
             dbg.write_text(path, "03b_drop_alwaysish.txt", stages[1])
             dbg.write_text(path, "03c_strip_decl_noise.txt", stages[2])
+            dbg.write_text(path, "03d0_pre_strip_module_ports.txt", stages[2])
             dbg.write_text(path, "03d_strip_module_ports.txt", stages[3])
             dbg.write_text(path, "03e_scan_input.txt", stages[4])
             dbg.write_text(

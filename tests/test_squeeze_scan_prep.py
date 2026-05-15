@@ -29,6 +29,33 @@ endmodule
     assert "sub" in r.referenced_modules
 
 
+def test_multiline_assign_stripped_until_semicolon() -> None:
+    src = """
+module m;
+  assign xxx = 1'b0 |
+          1'b1 |
+          1'b0;
+  dep_mod u ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert "dep_mod" in r.referenced_modules
+
+
+def test_leading_parameterized_instance_body_not_stripped_as_module_header() -> None:
+    """module 体首 ``#(…)`` 若为例化参数表（后接模块名而非端口表 ``(`` / ``;``），不得整段剥掉。"""
+    src = """
+module top ();
+  #(.W(1)) sub i ();
+endmodule
+"""
+    squ = squeeze_for_dependency_scan(src)
+    r = scan_verilog_body(squ)
+    assert r.defined_modules == ["top"]
+    assert "sub" in r.referenced_modules
+
+
 def test_input_output_port_lines_stripped() -> None:
     src = """
 module m (
@@ -42,6 +69,7 @@ endmodule
     squ = squeeze_for_dependency_scan(src)
     r = scan_verilog_body(squ)
     assert "leaf_mod" in r.referenced_modules
+
 
 def test_timescale_and_celldefine_lines_stripped() -> None:
     src = """

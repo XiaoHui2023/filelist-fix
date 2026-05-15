@@ -219,13 +219,15 @@ def _consume_always_initial_final_block(lines: list[str], start: int, n: int) ->
 
 
 _NOISE_LINE = re.compile(
-    r"^\s*(?:assign|"
+    r"^\s*(?:"
     r"input|output|inout|ref|"
     r"wire|trireg|tri[01]?|tri|wand|wor|reg|logic|bit|"
     r"int(?:eger)?|shortint|longint|byte|real|time)\b",
 )
 # localparam / parameter 可能跨多行逗号续写，见 strip_decl_noise_lines 专支。
 _PARAM_MULTILINE_HEAD = re.compile(r"^\s*(?:localparam|localparameter|parameter)\b")
+# assign 右值可跨多行直至顶层分号，见 strip_decl_noise_lines 专支。
+_ASSIGN_MULTILINE_HEAD = re.compile(r"^\s*assign\b")
 # 文件级或 module 体内的编译指令行；整行去掉以免时间单位名等干扰跨行例化扫描。
 _DIRECTIVE_NOISE_LINE = re.compile(
     r"^\s*`(?:timescale|celldefine|endcelldefine)\b",
@@ -233,7 +235,7 @@ _DIRECTIVE_NOISE_LINE = re.compile(
 
 
 def strip_decl_noise_lines(src: str) -> str:
-    """按行去掉 assign、parameter/localparam（含多行逗号续写直至顶层分号）、port 方向等声明及若干编译指令行，减轻例化误匹配（启发式）。"""
+    """按行去掉 assign（含多行右值直至顶层分号）、parameter/localparam（含多行逗号续写直至顶层分号）、port 方向等声明及若干编译指令行，减轻例化误匹配（启发式）。"""
 
     def _blank_line(line: str) -> str:
         if line.endswith("\r\n"):
@@ -249,6 +251,15 @@ def strip_decl_noise_lines(src: str) -> str:
     while i < n:
         line = lines[i]
         if _PARAM_MULTILINE_HEAD.match(line):
+            while i < n:
+                cur = lines[i]
+                out.append(_blank_line(cur))
+                if _line_has_top_level_semicolon(cur):
+                    i += 1
+                    break
+                i += 1
+            continue
+        if _ASSIGN_MULTILINE_HEAD.match(line):
             while i < n:
                 cur = lines[i]
                 out.append(_blank_line(cur))
@@ -273,16 +284,39 @@ def _skip_leading_ws_nl(s: str, i: int) -> int:
 
 
 def _strip_module_body_header_prefix(body: str) -> str:
-    """去掉 module 名之后、endmodule 之前的 #(…) 与 (…) 端口表及收尾分号。"""
+    """去掉 module 名之后、endmodule 之前的 #(…) 与 (…) 端口表及收尾分号。
+
+    若体首 ``#(`` 实为带参数例化（``#(…)`` 后既非 ``(`` 端口表也非 ``;``），则不剥离，避免吞掉例化。
+    """
+
+    def _try_consume_module_hash_param_port_prefix(body_inner: str, i0: int) -> int | None:
+        """从 ``i0`` 处的 ``#`` 起，若为 module 的 ``#(…) (…) ;`` / ``#(…) ;`` 头则返回头后下标，否则 ``None``。"""
+        nloc = len(body_inner)
+        if i0 >= nloc or body_inner[i0] != "#":
+            return None
+        j = i0 + 1
+        j = _consume_h_ws(body_inner, j)
+        if j >= nloc or body_inner[j] != "(":
+            return None
+        j = _skip_balanced_parens(body_inner, j)
+        j = _skip_leading_ws_nl(body_inner, j)
+        if j < nloc and body_inner[j] == "(":
+            j = _skip_balanced_parens(body_inner, j)
+            j = _skip_leading_ws_nl(body_inner, j)
+        elif j < nloc and body_inner[j] not in "(;":
+            return None
+        if j < nloc and body_inner[j] == ";":
+            return j + 1
+        return None
 
     i = _skip_leading_ws_nl(body, 0)
     n = len(body)
     if i < n and body[i] == "#":
-        i += 1
-        i = _consume_h_ws(body, i)
-        if i < n and body[i] == "(":
-            i = _skip_balanced_parens(body, i)
-        i = _skip_leading_ws_nl(body, i)
+        j = _try_consume_module_hash_param_port_prefix(body, i)
+        if j is not None:
+            i = j
+        else:
+            return body[i:]
     if i < n and body[i] == "(":
         i = _skip_balanced_parens(body, i)
         i = _skip_leading_ws_nl(body, i)
@@ -325,7 +359,7 @@ def squeeze_pipeline_for_dependency_scan(
 
         #. **strip_comments**：注释与串内形状处理，避免误匹配。
         #. **drop_alwaysish**：``always``/``initial``/``final``、``task``、``specify``、``generate`` 等整块。
-        #. **strip_decl_noise**：assign、parameter、port 方向、wire、若干 `` ` `` 编译指令行。
+        #. **strip_decl_noise**：assign（含多行右值至顶层分号）、parameter、port 方向、wire、若干 `` ` `` 编译指令行。
         #. **strip_module_ports**：各 module 体内去掉端口头。
         #. **scan_input**：已识别例化的端口表内置空白，再送入 ``scan_verilog_body``。
     """
@@ -342,7 +376,7 @@ def squeeze_for_dependency_scan(src: str) -> str:
     """按固定顺序压缩文本，去掉与例化无关的干扰后再做端口剥离与例化端口骨架化。
 
     顺序为：去注释 → 去过程块（含 **always** 全家、**task**、**specify**、**generate…endgenerate** 等；
-    **generate** 体内例化不再抽取）→ 声明/指令行噪声 → module 端口头 → 端口表空白化；输出供 ``scan_verilog_body`` 使用。
+    **generate** 体内例化不再抽取）→ 声明/指令行噪声（含多行 **assign**）→ module 端口头 → 端口表空白化；输出供 ``scan_verilog_body`` 使用。
     """
     return squeeze_pipeline_for_dependency_scan(src)[-1]
 

@@ -31,6 +31,7 @@ def test_debug_dump_writes_pipeline_files(tmp_path: Path) -> None:
     assert "03a_strip_comments.txt" in names
     assert "03b_drop_alwaysish.txt" in names
     assert "03c_strip_decl_noise.txt" in names
+    assert "03d0_pre_strip_module_ports.txt" in names
     assert "03d_strip_module_ports.txt" in names
     assert "03e_scan_input.txt" in names
     assert "05_instance_scan_trace.txt" in names
@@ -38,7 +39,13 @@ def test_debug_dump_writes_pipeline_files(tmp_path: Path) -> None:
     assert (dbg_root / "README.txt").is_file()
     assert not (dbg_root / "last_run.txt").exists()
     assert subdirs[0].name == "m"
-    trace = (subdirs[0] / "05_instance_scan_trace.txt").read_text(encoding="utf-8")
+    ddir = subdirs[0]
+    assert (
+        ddir / "03c_strip_decl_noise.txt"
+    ).read_text(encoding="utf-8") == (ddir / "03d0_pre_strip_module_ports.txt").read_text(
+        encoding="utf-8"
+    )
+    trace = (ddir / "05_instance_scan_trace.txt").read_text(encoding="utf-8")
     assert "MATCH" in trace
     assert "sub" in trace
 
