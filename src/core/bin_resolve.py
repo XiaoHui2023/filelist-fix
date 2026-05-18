@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from core.path_logical import logical_abs
+
 
 class ToolBinaryLocator:
     """在仓库 `tools/bin` 或 PyInstaller 包内 `tools/bin` 定位 rg、fd（不读 PATH）。"""
@@ -48,7 +50,7 @@ def normalize_search_roots(paths: list[Path]) -> list[Path]:
     """把用户输入规范成存在的目录或文件的绝对路径列表。"""
     out: list[Path] = []
     for p in paths:
-        r = p.expanduser().resolve()
+        r = logical_abs(p.expanduser())
         if not r.exists():
             raise FileNotFoundError(str(r))
         out.append(r)

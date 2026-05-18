@@ -9,6 +9,7 @@ from api.resolve.verilog_text import (
     ScanVerilogForDependenciesAPI,
     SqueezeForDependencyScanAPI,
 )
+from core.path_logical import logical_abs
 from verilog_text.preproc import PreprocDirectiveParser
 from verilog_text.scan import scan_verilog_body
 from verilog_text.scan_trace import build_instance_scan_trace
@@ -24,11 +25,11 @@ _INCLUDE = re.compile(r"^\s*`include\s+(?:\"([^\"]+)\"|<([^>]+)>)\s*(//.*)?$")
 def resolve_include_path(rel: str, current_file: Path, incdirs: list[Path]) -> Path | None:
     """按当前文件目录与 incdir 列表解析 `include 目标。"""
     rel_p = Path(rel)
-    cand = (current_file.parent / rel_p).resolve()
+    cand = logical_abs(current_file.parent / rel_p)
     if cand.is_file():
         return cand
     for d in incdirs:
-        c2 = (d / rel_p).resolve()
+        c2 = logical_abs(d / rel_p)
         if c2.is_file():
             return c2
     return None
@@ -45,7 +46,7 @@ def flatten_active_text(
     """在同一套预处理状态下展开可参与依赖分析的源码（含活动分支内的 `include）。"""
     if depth > 96:
         raise RecursionError("`include` nesting too deep (possible cycle or broken tree)")
-    path = path.resolve()
+    path = logical_abs(path)
     if path in stack:
         return ""
     stack.add(path)

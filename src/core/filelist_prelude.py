@@ -8,6 +8,7 @@ from pathlib import Path
 from core.bin_resolve import path_stat_sig
 from core.filelist_paths import format_listed_path
 from core.hdl_extensions import HD_SOURCE_EXTENSIONS
+from core.path_logical import logical_abs
 
 _INCDIR = re.compile(r"^\+incdir\+(\"([^\"]+)\"|(\S+))")
 _DEFINE = re.compile(r"^\+define\+([A-Za-z_]\w*)(?:=(.*))?$")
@@ -72,8 +73,8 @@ def _parse_first_path_token(rest: str) -> str:
 def _resolve_path_token(host_dir: Path, token: str) -> Path:
     raw = Path(token).expanduser()
     if raw.is_absolute():
-        return raw.resolve()
-    return (host_dir / raw).resolve()
+        return logical_abs(raw)
+    return logical_abs(host_dir / raw)
 
 
 def _format_incdir_line(inc_resolved: Path, output_path: Path, *, absolute: bool) -> str:
@@ -93,7 +94,7 @@ def prelude_signature_from_files(files: list[Path]) -> str:
     """由本轮实际读过的 prelude / 嵌套 ``-f`` 文件（有序、去重首次出现）生成存档校验串。"""
     h = hashlib.sha256()
     for p in files:
-        rp = str(Path(p).resolve())
+        rp = str(logical_abs(Path(p)))
         try:
             mt, sz = path_stat_sig(p)
         except OSError:
@@ -108,7 +109,7 @@ def prelude_signature_from_files(files: list[Path]) -> str:
 
 
 def _record_sig(path: Path, sig_files: list[Path], sig_seen: set[Path]) -> None:
-    rp = path.resolve()
+    rp = logical_abs(path)
     if rp not in sig_seen:
         sig_seen.add(rp)
         sig_files.append(rp)
@@ -118,8 +119,8 @@ def _resolve_incdir(prelude_file: Path, inc: str) -> Path:
     """将 +incdir+ 路径解析为绝对路径；相对路径相对于**当前 filelist 文件**所在目录。"""
     raw = Path(inc).expanduser()
     if raw.is_absolute():
-        return raw.resolve()
-    return (prelude_file.parent / raw).resolve()
+        return logical_abs(raw)
+    return logical_abs(prelude_file.parent / raw)
 
 
 @dataclass
@@ -144,14 +145,16 @@ def _consume_one_filelist(
 ) -> None:
     if depth > _MAX_FILELIST_NEST:
         raise ValueError(f"prelude 嵌套 -f 超过 {_MAX_FILELIST_NEST} 层: {path}")
-    path = path.expanduser().resolve()
-    if path in visited:
+    path_expanded = path.expanduser()
+    path_disk = path_expanded.resolve()
+    if path_disk in visited:
         return
-    visited.add(path)
-    _record_sig(path, sig_files, sig_seen)
+    visited.add(path_disk)
+    path_log = logical_abs(path_expanded)
+    _record_sig(path_log, sig_files, sig_seen)
 
-    text = path.read_text(encoding="utf-8", errors="replace")
-    host_parent = path.parent
+    text = path_log.read_text(encoding="utf-8", errors="replace")
+    host_parent = path_log.parent
     for raw_line in text.splitlines():
         line = _strip_trailing_line_comment(raw_line)
         s = line.strip()
@@ -166,7 +169,7 @@ def _consume_one_filelist(
             if tok:
                 nested = _resolve_path_token(host_parent, tok)
                 if not nested.is_file():
-                    raise FileNotFoundError(f"嵌套 filelist 不存在: {nested}（自 {path}）")
+                    raise FileNotFoundError(f"嵌套 filelist 不存在: {nested}（自 {path_log}）")
                 _consume_one_filelist(
                     nested,
                     output_path=output_path,
@@ -185,7 +188,7 @@ def _consume_one_filelist(
             if tok:
                 src = _resolve_path_token(host_parent, tok)
                 if not src.is_file():
-                    raise FileNotFoundError(f"-v 源文件不存在: {src}（自 {path}）")
+                    raise FileNotFoundError(f"-v 源文件不存在: {src}（自 {path_log}）")
                 outcome.head_lines.append(
                     format_listed_path(src, output_path, absolute=path_absolute)
                 )
@@ -197,7 +200,7 @@ def _consume_one_filelist(
             if tok:
                 ydir = _resolve_path_token(host_parent, tok)
                 if not ydir.is_dir():
-                    raise FileNotFoundError(f"-y 目录不存在: {ydir}（自 {path}）")
+                    raise FileNotFoundError(f"-y 目录不存在: {ydir}（自 {path_log}）")
                 disp = format_listed_path(ydir, output_path, absolute=path_absolute)
                 outcome.head_lines.append(f"-y {disp}")
             continue
@@ -206,7 +209,7 @@ def _consume_one_filelist(
         if im:
             inc = im.group(2) or im.group(3) or ""
             if inc:
-                resolved = _resolve_incdir(path, inc)
+                resolved = _resolve_incdir(path_log, inc)
                 outcome.incdirs.append(resolved)
                 outcome.head_lines.append(
                     _format_incdir_line(resolved, output_path, absolute=path_absolute)
@@ -262,7 +265,8 @@ def load_prelude_files_with_signature(
         return out, prelude_signature_from_files(sig_files)
 
     for p0 in paths:
-        p = p0.expanduser().resolve()
+        p_exp = p0.expanduser()
+        p = logical_abs(p_exp)
         if not p.exists():
             raise FileNotFoundError(f"prelude 不存在: {p}")
         if _is_hdl_source_file(p):

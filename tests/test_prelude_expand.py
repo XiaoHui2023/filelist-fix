@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from core.archive_sqlite import FileParseArchive
 from core.filelist_prelude import load_prelude_files_with_signature, prelude_signature_from_files
+from core.path_logical import logical_abs
 from runtime.context import AppContext
 from runtime.filelist_app import FilelistApplication
 
@@ -87,4 +88,4 @@ def test_signature_stable_for_same_files(tmp_path: Path) -> None:
     _, s1 = load_prelude_files_with_signature([a], output_path=out, path_absolute=False)
     _, s2 = load_prelude_files_with_signature([a], output_path=out, path_absolute=False)
     assert s1 == s2
-    assert s1 == prelude_signature_from_files([a.resolve()])
+    assert s1 == prelude_signature_from_files([logical_abs(a)])

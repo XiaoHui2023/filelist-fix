@@ -76,7 +76,7 @@ def drop_alwaysish_blocks(src: str) -> str:
     """去掉与例化无关的过程性整块，减轻后续依赖扫描的正则工作量（启发式）。
 
     含 **always / always_ff / always_comb / always_latch**、**initial**、**final**（按
-    ``begin``/``end``、``case``/``endcase``、``fork``/``join`` 嵌套计数吞整块；无 ``begin`` 的 **if / else if / else** 扁平链在遇顶层 ``;`` 后仍前瞻 **``else``** 续吞；首行无 ``begin`` 时不再仅用首遇分号结束），以及 **task…endtask**、**extern task** 原型、
+    ``begin``/``end``、``case``/``endcase``、``fork``/``join`` 嵌套计数吞整块；**``always`` 与 ``_ff`` / ``_comb`` / ``_latch`` 分行书写**时仍视为同一触发；无 ``begin`` 的 **if / else if / else** 扁平链在遇顶层 ``;`` 后仍前瞻 **``else``** 续吞；首行无 ``begin`` 时不再仅用首遇分号结束），以及 **task…endtask**、**extern task** 原型、
     **specify…endspecify**。**generate…endgenerate** 保留，体内 **if / for / genvar / begin-end** 等结构中的例化仍交给后续跨行扫描。
     """
     lines = src.splitlines(True)
@@ -132,6 +132,11 @@ def drop_alwaysish_blocks(src: str) -> str:
                 specify_depth += 1
             i += 1
             continue
+
+        if re.match(r"^\s*always\s*$", line.rstrip("\r\n")) and i + 1 < n:
+            if re.match(r"^\s*_(?:ff|comb|latch)\b", lines[i + 1]):
+                i = _consume_always_initial_final_block(lines, i, n)
+                continue
 
         if _EXTERN_TASK_HEAD.match(line):
             i = skip_extern_task_proto(i)
@@ -297,6 +302,14 @@ def _skip_leading_ws_nl(s: str, i: int) -> int:
     return i
 
 
+def _skip_leading_vertical_ws(s: str, i: int) -> int:
+    """仅跳过垂直空白，保留行首水平空白（避免 ``module m import`` 同行时吞掉 ``m`` 与 ``import`` 间空格）。"""
+    n = len(s)
+    while i < n and s[i] in "\n\r\v\f":
+        i += 1
+    return i
+
+
 def _strip_module_body_header_prefix(body: str) -> str:
     """去掉 module 名之后、endmodule 之前的 #(…) 与 (…) 端口表及收尾分号。
 
@@ -323,7 +336,7 @@ def _strip_module_body_header_prefix(body: str) -> str:
             return j + 1
         return None
 
-    i = _skip_leading_ws_nl(body, 0)
+    i = _skip_leading_vertical_ws(body, 0)
     n = len(body)
     if i < n and body[i] == "#":
         j = _try_consume_module_hash_param_port_prefix(body, i)
@@ -349,12 +362,18 @@ def strip_module_port_regions(text: str) -> str:
         if not mh:
             pieces.append(text[pos:])
             break
-        pieces.append(text[pos : mh.end()])
-        em = _ENDMODULE.search(text, mh.end())
+        kbd = mh.end()
+        if kbd < len(text) and text[kbd] == "\n":
+            body_start = kbd + 1
+            pieces.append(text[pos : kbd + 1])
+        else:
+            body_start = kbd
+            pieces.append(text[pos:body_start])
+        em = _ENDMODULE.search(text, body_start)
         if not em:
-            pieces.append(text[mh.end() :])
+            pieces.append(text[body_start:])
             break
-        body = text[mh.end() : em.start()]
+        body = text[body_start : em.start()]
         pieces.append(_strip_module_body_header_prefix(body))
         pieces.append(text[em.start() : em.end()])
         pos = em.end()

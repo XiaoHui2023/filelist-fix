@@ -6,6 +6,7 @@ import impl  # noqa: F401 — register sinks
 
 from core.dependency_debug_dump import DependencyDebugDump
 from core.source_flatten import extract_dependencies_from_file
+from core.path_logical import logical_abs
 from runtime.context import AppContext
 
 
@@ -64,7 +65,7 @@ def test_debug_dump_clears_by_file_on_new_session(tmp_path: Path) -> None:
     extract_dependencies_from_file(b, [], {}, ctx=ctx_b)
     subs = list((dbg_root / "by_file").iterdir())
     assert len(subs) == 1
-    assert str(b.resolve()) in (subs[0] / "00_source_path.txt").read_text(encoding="utf-8")
+    assert str(logical_abs(b)) in (subs[0] / "00_source_path.txt").read_text(encoding="utf-8")
 
 
 def test_debug_dump_removes_legacy_last_run(tmp_path: Path) -> None:
@@ -106,4 +107,4 @@ def test_debug_dump_00_source_path_overwrites_stale(tmp_path: Path) -> None:
     sub = next((dbg_root / "by_file").iterdir())
     (sub / "00_source_path.txt").write_text("stale-path\n", encoding="utf-8")
     extract_dependencies_from_file(src, [], {}, ctx=ctx)
-    assert (sub / "00_source_path.txt").read_text(encoding="utf-8").strip() == str(src.resolve())
+    assert (sub / "00_source_path.txt").read_text(encoding="utf-8").strip() == str(logical_abs(src))

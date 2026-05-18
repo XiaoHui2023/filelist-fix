@@ -20,14 +20,15 @@ from api.events.filelist_build import (
 from api.events.progress import OnProgressAPI
 from core.archive_sqlite import FileParseArchive
 from core.bin_resolve import ToolBinaryLocator, normalize_search_roots
-from core.filelist_paths import format_listed_path
 from core.dep_order import prerequisite_edges, topo_prereq_first
 from core.fd_search import FdModuleSearch
+from core.filelist_paths import format_listed_path
 from core.filelist_prelude import (
     PreludeOutcome,
     load_prelude_files_with_signature,
     prelude_signature_from_files,
 )
+from core.path_logical import logical_abs
 from core.rg_search import RgModuleSearch
 from core.source_flatten import extract_dependencies_from_file
 from runtime.log_format import lines_block
@@ -61,11 +62,29 @@ class FilelistSessionState:
 
     module_to_file: dict[str, Path] = field(default_factory=dict)
     file_refs: dict[Path, list[str]] = field(default_factory=dict)
-    parsed_files: set[Path] = field(default_factory=set)
+    parsed_resolved: set[Path] = field(default_factory=set)
     defines: dict[str, str] = field(default_factory=dict)
     incdirs: list[Path] = field(default_factory=list)
     unresolved_modules: list[str] = field(default_factory=list)
     _unresolved_seen: set[str] = field(default_factory=set, init=False, repr=False, compare=False)
+    _logical_by_resolved: dict[Path, Path] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+
+    def canonical_source_path(self, hit: Path) -> Path:
+        """同一 inode 多次以不同逻辑路径出现时，统一为首次见到的逻辑路径。"""
+        h = logical_abs(hit)
+        r = h.resolve()
+        if r not in self._logical_by_resolved:
+            self._logical_by_resolved[r] = h
+        return self._logical_by_resolved[r]
+
+    def inode_was_parsed(self, hit: Path) -> bool:
+        """是否已对该 inode 做过依赖抽取（与写出 filelist 用的逻辑路径无关）。"""
+        return logical_abs(hit).resolve() in self.parsed_resolved
+
+    def note_inode_parsed(self, hit: Path) -> None:
+        self.parsed_resolved.add(logical_abs(hit).resolve())
 
     def note_unresolved(self, name: str) -> None:
         """未找到定义时记录一次；并将该名记入 ``_unresolved_seen``，本会话内不再 fd/rg、不再入队。"""
@@ -139,7 +158,7 @@ class FilelistApplication:
         """
         hint = self._save.get_module_hint(mod)
         if hint is not None:
-            hp = hint.resolve()
+            hp = logical_abs(hint)
             if not hp.is_file():
                 self._save.delete_module_hint(mod)
             else:
@@ -155,7 +174,7 @@ class FilelistApplication:
         found = self._tools.find_file(mod, self._search_roots)
         if found is None:
             return None
-        return found.resolve()
+        return logical_abs(found)
 
     def _emit_filelist_file(self, ctx: Any, rb: ResolvedBuild) -> None:
         ctx.fire(
@@ -245,7 +264,7 @@ class FilelistApplication:
 
                 if mod in st.module_to_file:
                     fp = st.module_to_file[mod]
-                    if fp.resolve() not in st.parsed_files:
+                    if fp.resolve() not in st.parsed_resolved:
                         ctx.fire(OnModuleIndexInconsistentAPI, module_name=mod)
                         if log is not None and log.isEnabledFor(logging.DEBUG):
                             log.debug(
@@ -276,10 +295,11 @@ class FilelistApplication:
                             mod,
                         )
                     continue
+                hit = st.canonical_source_path(hit)
                 if log is not None and log.isEnabledFor(logging.DEBUG):
                     log.debug("module %r -> %s", mod, hit)
 
-                if hit in st.parsed_files:
+                if st.inode_was_parsed(hit):
                     defs, _, _ = self._ingest_cache(hit)
                     if not defs:
                         defs, _, _ = extract_dependencies_from_file(
@@ -342,7 +362,7 @@ class FilelistApplication:
                 for d in defs:
                     st.module_to_file.setdefault(d, hit)
                 st.file_refs[hit] = list(refs)
-                st.parsed_files.add(hit)
+                st.note_inode_parsed(hit)
                 for r in refs:
                     if r not in st.module_to_file and r not in st._unresolved_seen:
                         q.append(r)

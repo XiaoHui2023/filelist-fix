@@ -6,10 +6,11 @@ from pathlib import Path
 
 from core.hdl_extensions import rg_include_globs
 from core.path_exclude import path_is_excluded
+from core.path_logical import logical_abs
 
 
 class RgModuleSearch:
-    """用 rg 在源码中按 module 声明定位模块定义文件。"""
+    """用 rg 在源码中按 ``module`` / ``primitive`` / ``package`` 声明定位定义文件。"""
 
     def __init__(self, rg_exe: str) -> None:
         self._rg = rg_exe
@@ -17,7 +18,7 @@ class RgModuleSearch:
     def _pattern(self, module_name: str) -> str:
         # Verilog UDP 与用户模块例化同形；定义关键字为 ``primitive``，须与 ``module`` 一并检索。
         esc = re.escape(module_name)
-        return rf"(?:module|primitive)\s+{esc}\b"
+        return rf"(?:module|primitive|package)\s+{esc}\b"
 
     def search(
         self,
@@ -50,7 +51,7 @@ class RgModuleSearch:
                 line = line.strip()
                 if not line:
                     continue
-                cand = Path(line).resolve()
+                cand = logical_abs(Path(line))
                 if path_is_excluded(cand, excl):
                     continue
                 if best is None or len(cand.parts) < len(best.parts):

@@ -54,7 +54,7 @@
 ### ScanVerilogForDependenciesAPI
 
 - **调用时机**：与 `SqueezeForDependencyScanAPI` 同一步骤链上、紧接 squeeze 输出之后
-- **说明**：从已压缩文本解析出定义模块、引用模块（**内建门原语不入引用列表**）与 include 路径串
+- **说明**：从已压缩文本解析出定义模块与 **package**、引用模块与 **import 所依赖的包名**（**内建门原语不入引用列表**）及 include 路径串
 
 ### JoinContinuedLinesAPI
 

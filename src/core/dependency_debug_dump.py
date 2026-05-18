@@ -5,6 +5,8 @@ import os
 import shutil
 from pathlib import Path
 
+from core.path_logical import logical_abs
+
 _README = """依赖解析调试输出（本目录由 --debug-dump 生成）
 
 工具**不在**本目录写入任何日历日期、时钟时间或进程号类旁路文件；日志请用 **`-l`**，与这里无关。
@@ -13,7 +15,7 @@ _README = """依赖解析调试输出（本目录由 --debug-dump 生成）
 
 ## 子目录名里末尾的十六进制串是什么
 
-`by_file/` 下每个子目录通常名为**去掉扩展名后的短文件名**（非字母数字等字符会换成下划线，过长会截断）。**仅当**本轮解析中**多个不同源文件**在用过上述规则后会**同名**时，才在目录名末尾追加 `_` + **16 位小写十六进制**；该串是 **SHA256（UTF-8 编码的该源文件绝对路径）取前 16 个十六进制字符**，由路径唯一确定，**不是随机数、也不是日期**。用途：不同路径下若基名相同，仍能得到不同子目录。
+`by_file/` 下每个子目录通常名为**去掉扩展名后的短文件名**（非字母数字等字符会换成下划线，过长会截断）。**仅当**本轮解析中**多个不同源文件**在用过上述规则后会**同名**时，才在目录名末尾追加 `_` + **16 位小写十六进制**；该串是 **SHA256（UTF-8 编码的该源文件逻辑绝对路径）取前 16 个十六进制字符**，由路径唯一确定，**不是随机数、也不是日期**。用途：不同路径下若基名相同，仍能得到不同子目录。
 
 ## 重复生成与同一路径
 
@@ -28,7 +30,7 @@ _README = """依赖解析调试输出（本目录由 --debug-dump 生成）
 每个被解析的源文件对应一个子目录（命名规则见上；无同名冲突时不带十六进制尾缀）。
 目录内各文件大致对应流水线顺序（与实现一致）：
 
-1. 00_source_path.txt — 该目录对应的源文件绝对路径。
+1. 00_source_path.txt — 该目录对应的源文件绝对路径（不解析符号链接，与写入 filelist 的路径形态一致）。
 2. 01_joined.txt — 读盘后做反斜杠续行折叠的结果（尚未跑 ifdef 等预处理行）。
 3. 02_flatten_merged.txt — 在当前宏与 ifdef 活动分支下，本文件行与已展开 include 子树拼成的一段文本（递归时每个物理文件各有一份目录）。
 4. 03a_strip_comments.txt — 去掉 // 与块注释、尽量保留串内形状后的文本。
@@ -67,8 +69,8 @@ class DependencyDebugDump:
         self._stem_collided: set[str] = set()
 
     @staticmethod
-    def _hash16(resolved: Path) -> str:
-        return hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:16]
+    def _hash16(path: Path) -> str:
+        return hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:16]
 
     @staticmethod
     def _sanitize_stem(source_path: Path) -> str:
@@ -76,49 +78,39 @@ class DependencyDebugDump:
         return stem if stem else "_"
 
     @staticmethod
-    def _marker_same_source(marker_text: str, resolved: Path) -> bool:
+    def _marker_same_source(marker_text: str, display: Path) -> bool:
         t = marker_text.strip()
-        if t == str(resolved):
+        if t == str(display):
             return True
         if not t:
             return True
         prev = Path(t)
         try:
-            prev_res = prev.resolve()
-        except OSError:
-            return True
-        try:
-            exists = prev_res.exists()
-        except OSError:
-            return True
-        if not exists:
-            return True
-        try:
-            return os.path.samefile(prev_res, resolved)
+            return os.path.samefile(prev, display)
         except OSError:
             return False
 
     def _target_dir(self, source_path: Path) -> Path:
-        resolved = source_path.resolve()
-        key = str(resolved)
+        display = logical_abs(source_path)
+        key = str(display)
         hit = self._resolved_dir.get(key)
         if hit is not None:
             d = hit
             (d / "00_source_path.txt").write_text(
-                str(resolved),
+                str(display),
                 encoding="utf-8",
                 newline="\n",
             )
             return d
 
-        stem = self._sanitize_stem(source_path)
+        stem = self._sanitize_stem(display)
         by_file = self._root / "by_file"
 
         if stem in self._stem_collided:
-            d = by_file / f"{stem}_{self._hash16(resolved)}"
+            d = by_file / f"{stem}_{self._hash16(display)}"
             d.mkdir(parents=True, exist_ok=True)
             (d / "00_source_path.txt").write_text(
-                str(resolved),
+                str(display),
                 encoding="utf-8",
                 newline="\n",
             )
@@ -129,25 +121,25 @@ class DependencyDebugDump:
         if plain.is_dir():
             marker = plain / "00_source_path.txt"
             prev = marker.read_text(encoding="utf-8") if marker.is_file() else ""
-            if self._marker_same_source(prev, resolved):
+            if self._marker_same_source(prev, display):
                 d = plain
             else:
                 self._stem_collided.add(stem)
                 old_txt = prev.strip()
-                old_res = Path(old_txt).resolve() if old_txt else resolved
-                hashed_old = by_file / f"{stem}_{self._hash16(old_res)}"
+                old_disp = logical_abs(Path(old_txt)) if old_txt else display
+                hashed_old = by_file / f"{stem}_{self._hash16(old_disp)}"
                 if hashed_old.exists():
                     raise FileExistsError(f"debug dump rename target exists: {hashed_old}")
                 plain.rename(hashed_old)
-                self._resolved_dir[str(old_res)] = hashed_old
-                d = by_file / f"{stem}_{self._hash16(resolved)}"
+                self._resolved_dir[str(old_disp)] = hashed_old
+                d = by_file / f"{stem}_{self._hash16(display)}"
                 d.mkdir(parents=True, exist_ok=True)
         else:
             d = plain
             d.mkdir(parents=True, exist_ok=True)
 
         (d / "00_source_path.txt").write_text(
-            str(resolved),
+            str(display),
             encoding="utf-8",
             newline="\n",
         )

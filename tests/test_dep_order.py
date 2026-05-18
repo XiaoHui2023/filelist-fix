@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from core.dep_order import prerequisite_edges, topo_prereq_first
+from core.path_logical import logical_abs
 
 
 def test_topo_dependency_before_user(tmp_path: Path) -> None:
@@ -13,5 +14,5 @@ def test_topo_dependency_before_user(tmp_path: Path) -> None:
     pre = prerequisite_edges(refs, modmap)
     nodes = set(refs.keys()) | {b}
     order = topo_prereq_first(pre, nodes)
-    ar, br = a.resolve(), b.resolve()
+    ar, br = logical_abs(a), logical_abs(b)
     assert order.index(br) < order.index(ar)

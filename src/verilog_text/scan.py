@@ -37,6 +37,7 @@ _ANCHOR_BEFORE_INSTANCE = frozenset(
     }
 )
 _ID_HEAD = re.compile(r"([A-Za-z_]\w*)\b")
+_TYPEDEF_KW = re.compile(r"\btypedef\b")
 
 _MODULE_HEAD = re.compile(
     r"(?m)^\s*module\s+(?:automatic\s+)?([A-Za-z_]\w*)\b",
@@ -47,8 +48,15 @@ _MODULE_LINE = re.compile(
     r"^\s*(?:macromodule\s+|module\s+(?:automatic\s+)?)([A-Za-z_]\w*)\b",
 )
 _ENDMODULE_LINE = re.compile(r"^\s*endmodule\b")
+# ``package`` / ``endpackage``：与 module 类似做行栈，取体内 ``import …::`` 及 ``include``。
+_PACKAGE_LINE = re.compile(
+    r"^\s*package\s+(?:automatic\s+)?([A-Za-z_]\w*)\b\s*;",
+)
+_ENDPACKAGE_LINE = re.compile(r"^\s*endpackage\b")
 # 用户定义原语（UDP）：与 module 不同关键字，例化形态与模块相同。
 _PRIMITIVE_DEF_HEAD = re.compile(r"(?m)^\s*primitive\s+([A-Za-z_]\w*)\b")
+# ``import pkg::*`` / ``import pkg::sym`` 中包名（多行 ``import`` 直至分号）。
+_IMPORT_PKG_ITEM = re.compile(r"([A-Za-z_]\w*)\s*::\s*(?:\*|[A-Za-z_]\w*)")
 _INCLUDE = re.compile(r"^\s*`include\s+(?:\"([^\"]+)\"|<([^>]+)>)\s*$")
 _kw = frozenset(
     {
@@ -218,6 +226,197 @@ def _skip_ws_any(s: str, i: int) -> int:
     return i
 
 
+def _skip_sv_attribute_instances(s: str, i: int) -> int:
+    """跳过 ``(* … *)`` 属性实例（可连续多个）。"""
+    n = len(s)
+    while True:
+        i = _skip_ws_any(s, i)
+        if i >= n - 1 or s[i : i + 2] != "(*":
+            return i
+        j = i + 2
+        depth = 1
+        while j < n - 1 and depth > 0:
+            if s[j : j + 2] == "(*":
+                depth += 1
+                j += 2
+            elif s[j : j + 2] == "*)":
+                depth -= 1
+                j += 2
+            else:
+                j += 1
+        if depth != 0:
+            return i
+        i = j
+
+
+def _consume_toplevel_semicolon_statement(s: str, start: int) -> int:
+    """从 ``start``（语句首字符）吞到与之配对的顶层 ``;`` 之后下标（粗略处理串内引号）。"""
+    n = len(s)
+    j = start
+    p = br = bc = 0
+    in_dq = False
+    esc = False
+    while j < n:
+        ch = s[j]
+        if in_dq:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_dq = False
+            j += 1
+            continue
+        if ch == '"':
+            in_dq = True
+            j += 1
+            continue
+        if ch == "'":
+            k = j + 1
+            while k < n:
+                if s[k] == "'" and s[k - 1] != "\\":
+                    j = k + 1
+                    break
+                k += 1
+            else:
+                j = n
+            continue
+        if ch == "(":
+            p += 1
+        elif ch == ")":
+            if p > 0:
+                p -= 1
+        elif ch == "[":
+            br += 1
+        elif ch == "]":
+            if br > 0:
+                br -= 1
+        elif ch == "{":
+            bc += 1
+        elif ch == "}":
+            if bc > 0:
+                bc -= 1
+        elif ch == ";" and p == 0 and br == 0 and bc == 0:
+            return j + 1
+        j += 1
+    return n
+
+
+def _package_names_in_import_statement(stmt: str) -> list[str]:
+    """从 ``import … ;`` 子串中提取 ``pkg``（``pkg::*`` / ``pkg::id``）。"""
+    return _IMPORT_PKG_ITEM.findall(stmt)
+
+
+def _collect_pkg_imports_from_module_or_package_header(body: str) -> list[str]:
+    """解析 ``module``/``package`` 体首段：``import`` 声明（可跨行）直至 ``#(`` 或端口 ``(``。"""
+    out: list[str] = []
+    i = _skip_ws_any(body, 0)
+    while i < len(body):
+        i = _skip_sv_attribute_instances(body, i)
+        i = _skip_ws_any(body, i)
+        if i >= len(body):
+            break
+        if i < len(body) - 1 and body[i : i + 2] == "#(":
+            break
+        if body[i] == "(" and not body.startswith("(*", i):
+            break
+        m = re.match(r"\bimport\b", body[i:])
+        if not m:
+            break
+        stmt_start = i + m.start()
+        stmt_body_start = i + m.end()
+        stmt_end = _consume_toplevel_semicolon_statement(s=body, start=stmt_body_start)
+        stmt = body[stmt_start:stmt_end]
+        out.extend(_package_names_in_import_statement(stmt))
+        i = stmt_end
+    return out
+
+
+def _split_package_regions_by_stack(text: str) -> list[tuple[str, str]]:
+    """按行栈配对 ``package``/``endpackage``，返回 ``(包名, 体内文本)``。
+
+    体内自 **``package`` 行上包名之后** 起算（可含同行 ``import``），直至 ``endpackage`` 行首之前。
+    """
+    lines = text.splitlines(True)
+    offsets: list[int] = []
+    o = 0
+    for ln in lines:
+        offsets.append(o)
+        o += len(ln)
+    stack: list[tuple[str, int]] = []
+    regions: list[tuple[str, str]] = []
+    for i, line in enumerate(lines):
+        if _ENDPACKAGE_LINE.match(line):
+            if not stack:
+                continue
+            name, body_start = stack.pop()
+            body_end = offsets[i]
+            regions.append((name, text[body_start:body_end]))
+            continue
+        mm = _PACKAGE_LINE.match(line)
+        if mm:
+            stack.append((mm.group(1), offsets[i] + mm.end()))
+    if stack:
+        return []
+    return regions
+
+
+def _typedef_declaration_spans(body: str) -> list[tuple[int, int]]:
+    """``typedef`` 起至结束分号（括号/方括号/花括号深度归零）的区间，用于避免误扫 ``struct``/``enum`` 体内的 ``type id ();`` 形态。"""
+    spans: list[tuple[int, int]] = []
+    for m in _TYPEDEF_KW.finditer(body):
+        lo = m.start()
+        hi = _typedef_declaration_end_exclusive(body, m.end())
+        spans.append((lo, hi))
+    return spans
+
+
+def _typedef_declaration_end_exclusive(s: str, i0: int) -> int:
+    """从 ``typedef`` 关键字结束下标起，找到与之配对的本条声明末尾 ``;`` 之后下标。"""
+    n = len(s)
+    i = i0
+    p = br = bc = 0
+    while i < n:
+        ch = s[i]
+        if ch == "(":
+            p += 1
+        elif ch == ")":
+            if p > 0:
+                p -= 1
+        elif ch == "[":
+            br += 1
+        elif ch == "]":
+            if br > 0:
+                br -= 1
+        elif ch == "{":
+            bc += 1
+        elif ch == "}":
+            if bc > 0:
+                bc -= 1
+        elif ch == ";" and p == 0 and br == 0 and bc == 0:
+            return i + 1
+        i += 1
+    return n
+
+
+def _pos_in_any_span(pos: int, spans: list[tuple[int, int]]) -> bool:
+    for lo, hi in spans:
+        if lo <= pos < hi:
+            return True
+    return False
+
+
+def _is_begin_colon_block_label(s: str, label_id_end: int) -> bool:
+    """若 ``label_id_end`` 落在 ``begin : …`` 的块标签标识符尾上，返回 True。"""
+    if label_id_end < 0 or label_id_end >= len(s) or not (s[label_id_end].isalnum() or s[label_id_end] == "_"):
+        return False
+    lo = label_id_end
+    while lo - 1 >= 0 and (s[lo - 1].isalnum() or s[lo - 1] == "_"):
+        lo -= 1
+    head = s[:lo].rstrip(" \t")
+    return bool(re.search(r"\bbegin\s*:\s*$", head))
+
+
 def _word_ending_at(s: str, j: int) -> str | None:
     """若 ``s[j]`` 落在标识符尾上，返回该标识符全文，否则返回 None。"""
     if j < 0 or j >= len(s) or not (s[j].isalnum() or s[j] == "_"):
@@ -245,7 +444,11 @@ def _at_instance_scan_anchor(s: str, pos: int) -> bool:
     if s[j] in ";{}():":
         return True
     w = _word_ending_at(s, j)
-    return w is not None and w in _ANCHOR_BEFORE_INSTANCE
+    if w is not None and w in _ANCHOR_BEFORE_INSTANCE:
+        return True
+    if w is not None and _is_begin_colon_block_label(s, j):
+        return True
+    return False
 
 
 def _skip_balanced_parens(s: str, i: int) -> int:
@@ -324,7 +527,11 @@ def _collect_instance_refs_span_scan(body: str, self_mod: str, refs: list[str]) 
     """跨行例化：仅在锚点处尝试解析，避免实例名被当成模块类型。"""
     pos = 0
     n = len(body)
+    td_spans = _typedef_declaration_spans(body)
     while pos < n:
+        if _pos_in_any_span(pos, td_spans):
+            pos += 1
+            continue
         if _at_instance_scan_anchor(body, pos):
             hit = _try_parse_module_instantiation_span(body, pos, self_mod)
             if hit:
@@ -340,7 +547,11 @@ def skeletonize_body_instance_ports(body: str, self_mod: str) -> str:
     spans: list[_ModuleInstSpan] = []
     pos = 0
     n = len(body)
+    td_spans = _typedef_declaration_spans(body)
     while pos < n:
+        if _pos_in_any_span(pos, td_spans):
+            pos += 1
+            continue
         if _at_instance_scan_anchor(body, pos):
             hit = _try_parse_module_instantiation_span(body, pos, self_mod)
             if hit:
@@ -474,22 +685,29 @@ def _parse_bind_line(line: str) -> str | None:
 def _split_module_regions_by_stack(text: str) -> list[tuple[str, str]] | None:
     """按行栈配对 ``module``/``macromodule`` 与 ``endmodule``，返回 ``(模块名, 体内文本)`` 列表。
 
+    体内文本自 **``module`` 行上模块名之后** 起算（可含同行 ``import`` / ``#(`` 片段），直至 ``endmodule`` 行首之前。
+
     若 ``endmodule`` 不平衡则返回 ``None``，由调用方回退到旧启发式。
     """
     lines = text.splitlines(True)
+    offsets: list[int] = []
+    o = 0
+    for ln in lines:
+        offsets.append(o)
+        o += len(ln)
     stack: list[tuple[str, int]] = []
     regions: list[tuple[str, str]] = []
     for i, line in enumerate(lines):
         if _ENDMODULE_LINE.match(line):
             if not stack:
                 continue
-            name, start = stack.pop()
-            body = "".join(lines[start:i])
-            regions.append((name, body))
+            name, body_start = stack.pop()
+            body_end = offsets[i]
+            regions.append((name, text[body_start:body_end]))
             continue
         mm = _MODULE_LINE.match(line)
         if mm:
-            stack.append((mm.group(1), i + 1))
+            stack.append((mm.group(1), offsets[i] + mm.end()))
     if stack:
         return None
     return regions
@@ -515,9 +733,7 @@ def _module_body_spans_by_stack(text: str) -> list[tuple[str, int, int]] | None:
             continue
         mm = _MODULE_LINE.match(line)
         if mm:
-            nxt = i + 1
-            body_start = offsets[nxt] if nxt < len(lines) else offsets[i] + len(line)
-            stack.append((mm.group(1), body_start))
+            stack.append((mm.group(1), offsets[i] + mm.end()))
     if stack:
         return None
     return spans
@@ -531,6 +747,7 @@ class VerilogSliceScan:
 
 
 def _collect_refs_from_body(body: str, self_mod: str, refs: list[str]) -> None:
+    refs.extend(_collect_pkg_imports_from_module_or_package_header(body))
     _collect_instance_refs_span_scan(body, self_mod, refs)
     for line in body.splitlines():
         bh = _parse_bind_line(line)
@@ -545,6 +762,7 @@ def scan_verilog_body(text: str) -> VerilogSliceScan:
     若行级配对失败则回退到「首个 ``endmodule``」启发式。无成对 ``module`` 时对整段文本退化扫描。
     内建门原语（``and``/``nand``/``buf`` 等，**大小写不敏感**）按例化解析并参与端口骨架化，但**不**写入 ``referenced_modules``。
     用户定义 ``primitive``（UDP）名写入 ``defined_modules``，与 ``module`` 名一并参与闭包与索引。
+    ``package`` … ``endpackage`` 中定义的名字写入 ``defined_modules``；``module``/``package`` 体首段 ``import pkg::*`` / ``import pkg::sym``（可跨行）中的 **pkg** 写入 ``referenced_modules``，与例化名一并参与闭包定位。
     """
     defs: list[str] = []
     refs: list[str] = []
@@ -569,13 +787,25 @@ def scan_verilog_body(text: str) -> VerilogSliceScan:
                 break
             name = mh.group(1)
             defs.append(name)
-            body = text[mh.end() : end.start()]
+            kbd = mh.end()
+            if kbd < len(text) and text[kbd] == "\n":
+                body_start = kbd + 1
+            else:
+                body_start = kbd
+            body = text[body_start : end.start()]
             for im in _INCLUDE.finditer(body):
                 p = im.group(1) or im.group(2) or ""
                 if p:
                     incs.append(p.strip())
             _collect_refs_from_body(body, name, refs)
             pos = end.end()
+    for pname, pbody in _split_package_regions_by_stack(text):
+        defs.append(pname)
+        for im in _INCLUDE.finditer(pbody):
+            p = im.group(1) or im.group(2) or ""
+            if p:
+                incs.append(p.strip())
+        _collect_refs_from_body(pbody, pname, refs)
     for line in text.splitlines():
         bh = _parse_bind_line(line)
         if bh:

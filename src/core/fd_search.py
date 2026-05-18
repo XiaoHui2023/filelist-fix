@@ -6,6 +6,7 @@ from pathlib import Path
 
 from core.hdl_extensions import HD_SOURCE_EXTENSIONS
 from core.path_exclude import path_is_excluded
+from core.path_logical import logical_abs
 
 
 class FdModuleSearch:
@@ -45,7 +46,7 @@ class FdModuleSearch:
                 line = line.strip()
                 if not line:
                     continue
-                cand = Path(line).resolve()
+                cand = logical_abs(Path(line))
                 if path_is_excluded(cand, excl):
                     continue
                 if best is None or len(cand.parts) < len(best.parts):
