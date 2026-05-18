@@ -132,6 +132,31 @@ class FilelistApplication:
             excludes=self._exclude_paths,
         )
 
+    def _locate_module_file(self, mod: str) -> Path | None:
+        """先查 ``--save`` 的模块路径提示；可信则省略 fd/rg，否则退回检索。
+
+        提示路径上磁盘文件仍在但单文件缓存已过期时，按库内旧解析行的定义名与引用名清除 ``module_path``，便于下级模块重新定位；仍沿用该路径并交由后续步骤重新解析。
+        """
+        hint = self._save.get_module_hint(mod)
+        if hint is not None:
+            hp = hint.resolve()
+            if not hp.is_file():
+                self._save.delete_module_hint(mod)
+            else:
+                rec = self._save.get_valid(hp)
+                if rec is not None:
+                    defs_chk = json.loads(rec.defined_modules)
+                    if mod in defs_chk:
+                        return hp
+                    self._save.delete_module_hint(mod)
+                else:
+                    self._save.invalidate_module_hints_for_stale_file(hp)
+                    return hp
+        found = self._tools.find_file(mod, self._search_roots)
+        if found is None:
+            return None
+        return found.resolve()
+
     def _emit_filelist_file(self, ctx: Any, rb: ResolvedBuild) -> None:
         ctx.fire(
             OnProgressAPI,
@@ -241,7 +266,7 @@ class FilelistApplication:
                 if log is not None and log.isEnabledFor(logging.DEBUG):
                     log.debug("search definition for module %r", mod)
 
-                hit = self._tools.find_file(mod, self._search_roots)
+                hit = self._locate_module_file(mod)
                 if hit is None:
                     st.note_unresolved(mod)
                     ctx.fire(OnModuleResolveMissAPI, module_name=mod)
@@ -251,7 +276,6 @@ class FilelistApplication:
                             mod,
                         )
                     continue
-                hit = hit.resolve()
                 if log is not None and log.isEnabledFor(logging.DEBUG):
                     log.debug("module %r -> %s", mod, hit)
 
@@ -271,6 +295,7 @@ class FilelistApplication:
                     for d in defs:
                         st.module_to_file.setdefault(d, hit)
                     st.module_to_file.setdefault(mod, hit)
+                    self._save.upsert_module_hints(hit, defs, [mod])
                     continue
 
                 _fire_closure_progress(
@@ -311,6 +336,8 @@ class FilelistApplication:
                     defined_count=len(defs),
                     referenced_count=len(refs),
                 )
+
+                self._save.upsert_module_hints(hit, defs, [mod])
 
                 for d in defs:
                     st.module_to_file.setdefault(d, hit)
