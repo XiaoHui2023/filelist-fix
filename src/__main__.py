@@ -101,6 +101,13 @@ def main(argv: list[str] | None = None) -> int:
         console.print(line)
         if args.log_file is not None:
             log.warning('Not found module "%s"', name)
+    for spec, from_path in ctx.include_resolve_miss_order:
+        line = Text()
+        line.append("Warning", style=_WARN_STYLE)
+        line.append(f': Not found include "{spec}" in file "{from_path}"')
+        console.print(line)
+        if args.log_file is not None:
+            log.warning('Not found include "%s" in file "%s"', spec, from_path)
     return 0
 
 

@@ -58,10 +58,11 @@ def sink_source_parsed_progress(cb: OnSourceParsedAPI) -> None:
     except (IndexError, TypeError):
         task = None
     tag = "cache" if cb.cache_hit else "parse"
-    msg = (
-        f"[cyan]{escape(cb.path.name)}[/cyan] · [yellow]{tag}[/yellow] · "
-        f"[green]{cb.defined_count}[/green] def · [blue]{cb.referenced_count}[/blue] ref"
+    inner = (
+        f"{escape(cb.path.name)} · {tag} · "
+        f"{cb.defined_count} def · {cb.referenced_count} ref"
     )
+    msg = f"[bold]{inner}[/bold]"
     if task is not None and task.total is not None:
         prog.update(
             tid,

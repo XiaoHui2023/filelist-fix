@@ -21,6 +21,13 @@ class OnModuleResolveMissAPI(BaseAPI):
     module_name: str = Field(description="Module name queued for parsing but not found on disk")
 
 
+class OnIncludeResolveMissAPI(BaseAPI):
+    """Emitted when an active `` `include`` cannot be resolved (at most once per (from_file, spec) per run)."""
+
+    include_spec: str = Field(description="Include path as written in the directive (after stripping)")
+    from_file: Path = Field(description="Source file containing that `` `include`` line")
+
+
 class OnModuleIndexInconsistentAPI(BaseAPI):
     """Emitted when a module maps to a file that is not yet in the parsed-files set."""
 

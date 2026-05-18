@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, TypeVar
 
 from callback import Callback
@@ -25,6 +26,8 @@ class AppContext:
         self.progress_task_id = progress_task_id
         self.save = save
         self.dependency_debug_dump = dependency_debug_dump
+        self.include_resolve_miss_seen: set[tuple[str, str]] = set()
+        self.include_resolve_miss_order: list[tuple[str, Path]] = []
 
     def fire(self, api: type[TApi], **kwargs: Any) -> TApi:
         """触发已注册的同步回调链并返回载荷实例。"""

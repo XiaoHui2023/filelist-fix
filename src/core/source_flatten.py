@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from api.events.filelist_build import OnIncludeResolveMissAPI
 from api.resolve.verilog_text import (
     JoinContinuedLinesAPI,
     ScanVerilogForDependenciesAPI,
@@ -66,11 +67,22 @@ def flatten_active_text(
             inc = _INCLUDE.match(line)
             if inc and preproc.line_is_active_source():
                 target = inc.group(1) or inc.group(2) or ""
-                child = resolve_include_path(target.strip(), path, incdirs)
+                spec = target.strip()
+                child = resolve_include_path(spec, path, incdirs)
                 if child:
                     sub = flatten_active_text(child, preproc, incdirs, stack, depth + 1, ctx)
                     if sub:
                         chunks.append(sub)
+                elif ctx is not None:
+                    key = (str(path), spec)
+                    if key not in ctx.include_resolve_miss_seen:
+                        ctx.include_resolve_miss_seen.add(key)
+                        ctx.include_resolve_miss_order.append((spec, path))
+                        ctx.fire(
+                            OnIncludeResolveMissAPI,
+                            include_spec=spec,
+                            from_file=path,
+                        )
                 continue
             if preproc.line_is_active_source():
                 chunks.append(line)
