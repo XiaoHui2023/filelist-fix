@@ -354,8 +354,8 @@ endmodule
     assert "ok_mod" in r.referenced_modules
 
 
-def test_generate_nested_case_if_begin_stripped() -> None:
-    """generate 内嵌 case / if-else / begin-end 仍整段去掉，不外扫例化。"""
+def test_generate_nested_case_if_begin_instances_kept() -> None:
+    """generate 内嵌 case / if-else / begin-end 中的例化仍参与扫描。"""
     src = """
 module m;
   generate
@@ -376,11 +376,11 @@ endmodule
 """
     squ = squeeze_for_dependency_scan(src)
     r = scan_verilog_body(squ)
-    assert "ghost_inst" not in r.referenced_modules
+    assert "ghost_inst" in r.referenced_modules
     assert "good_mod" in r.referenced_modules
 
 
-def test_nested_generate_stripped() -> None:
+def test_nested_generate_instances_kept() -> None:
     src = """
 module m;
   generate
@@ -393,11 +393,11 @@ endmodule
 """
     squ = squeeze_for_dependency_scan(src)
     r = scan_verilog_body(squ)
-    assert "deep_ghost" not in r.referenced_modules
+    assert "deep_ghost" in r.referenced_modules
     assert "tail_mod" in r.referenced_modules
 
 
-def test_labelled_generate_stripped() -> None:
+def test_labelled_generate_instances_kept() -> None:
     src = """
 module m;
   outer_l : generate
@@ -408,7 +408,7 @@ endmodule
 """
     squ = squeeze_for_dependency_scan(src)
     r = scan_verilog_body(squ)
-    assert "ghost_a" not in r.referenced_modules
+    assert "ghost_a" in r.referenced_modules
     assert "good_b" in r.referenced_modules
 
 

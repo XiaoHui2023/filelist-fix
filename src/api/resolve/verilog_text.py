@@ -25,7 +25,7 @@ class DropAlwaysishBlocksAPI(BaseAPI):
     source_text: str = Field(description="Source text, typically already comment-stripped")
     dropped_text: str = Field(
         default="",
-        description="Output with always/initial/final, task/endtask, specify/endspecify, etc. removed",
+        description="Output with always/initial/final, task/endtask, specify/endspecify, etc. removed; generate/endgenerate retained",
     )
 
 

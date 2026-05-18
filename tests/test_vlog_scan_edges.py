@@ -17,7 +17,7 @@ endmodule
 
 
 def test_generate_block_instance() -> None:
-    """generate 体内例化被整段去掉；同模块在 generate 外的例化仍计入。"""
+    """generate / for / begin 内例化与块外例化均计入依赖。"""
     src = """
 module gen_holder ();
   genvar i;
@@ -30,8 +30,40 @@ module gen_holder ();
 endmodule
 """
     r = scan_verilog_body(squeeze_for_dependency_scan(src))
-    assert "torture_dep_a" not in r.referenced_modules
+    assert "torture_dep_a" in r.referenced_modules
     assert "torture_dep_b" in r.referenced_modules
+
+
+def test_generate_if_else_for_instances() -> None:
+    """generate 内 if-else、嵌套 generate-for、genvar 后例化均可扫到。"""
+    src = """
+module gen_mix ();
+  genvar gi;
+  generate
+    if (1) begin : b_if
+      dep_in_if di ();
+    end else begin : b_else
+      dep_in_else de ();
+    end
+    for (gi = 0; gi < 1; gi = gi + 1) begin : outer_g
+      genvar gj;
+      generate
+        for (gj = 0; gj < 1; gj = gj + 1) begin : inner_g
+          dep_nested dn ();
+        end
+      endgenerate
+    end
+  endgenerate
+endmodule
+"""
+    r = scan_verilog_body(squeeze_for_dependency_scan(src))
+    assert set(r.referenced_modules) == {
+        "dep_in_if",
+        "dep_in_else",
+        "dep_nested",
+    }
+
+
 def test_bind_line() -> None:
     src = """
 module mon ();

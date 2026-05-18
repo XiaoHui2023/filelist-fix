@@ -45,9 +45,6 @@ _ENDTASK_HEAD = re.compile(r"^\s*endtask\b")
 _EXTERN_TASK_HEAD = re.compile(r"^\s*extern\s+task\b")
 _SPECIFY_HEAD = re.compile(r"^\s*specify\b")
 _ENDSPECIFY_HEAD = re.compile(r"^\s*endspecify\b")
-# 行首可选 ``label :``；块内 case/if/begin 等由整段丢弃覆盖，无需单独配对。
-_GENERATE_HEAD = re.compile(r"^\s*(?:[A-Za-z_]\w*\s*:\s*)?generate\b")
-_ENDGENERATE_HEAD = re.compile(r"^\s*endgenerate\b")
 
 
 def strip_comments_preserve_strings(src: str) -> str:
@@ -80,8 +77,7 @@ def drop_alwaysish_blocks(src: str) -> str:
 
     含 **always / always_ff / always_comb / always_latch**、**initial**、**final**（按
     ``begin``/``end``、``case``/``endcase``、``fork``/``join`` 嵌套计数吞整块；无 ``begin`` 的 **if / else if / else** 扁平链在遇顶层 ``;`` 后仍前瞻 **``else``** 续吞；首行无 ``begin`` 时不再仅用首遇分号结束），以及 **task…endtask**、**extern task** 原型、
-    **specify…endspecify**、**generate…endgenerate**（按 generate 嵌套深度整段丢弃，
-    块内 case/if/begin 等不必单独解析）。**generate 体内的例化不再参与依赖抽取**。
+    **specify…endspecify**。**generate…endgenerate** 保留，体内 **if / for / genvar / begin-end** 等结构中的例化仍交给后续跨行扫描。
     """
     lines = src.splitlines(True)
     out: list[str] = []
@@ -90,7 +86,6 @@ def drop_alwaysish_blocks(src: str) -> str:
     trigger = re.compile(r"^\s*(always(?:_(?:ff|comb|latch))?|initial|final)\b")
     task_depth = 0
     specify_depth = 0
-    generate_depth = 0
 
     def skip_extern_task_proto(j: int) -> int:
         """跳过 ``extern task`` 原型（无 ``endtask``），直到形参表闭合后的分号。"""
@@ -138,14 +133,6 @@ def drop_alwaysish_blocks(src: str) -> str:
             i += 1
             continue
 
-        if generate_depth > 0:
-            if _ENDGENERATE_HEAD.match(line):
-                generate_depth -= 1
-            elif _GENERATE_HEAD.match(line):
-                generate_depth += 1
-            i += 1
-            continue
-
         if _EXTERN_TASK_HEAD.match(line):
             i = skip_extern_task_proto(i)
             continue
@@ -161,11 +148,6 @@ def drop_alwaysish_blocks(src: str) -> str:
 
         if _SPECIFY_HEAD.match(line):
             specify_depth = 1
-            i += 1
-            continue
-
-        if _GENERATE_HEAD.match(line):
-            generate_depth = 1
             i += 1
             continue
 
@@ -390,7 +372,7 @@ def squeeze_pipeline_for_dependency_scan(
         (strip_comments, drop_alwaysish, strip_decl_noise, strip_module_ports, scan_input).
 
         #. **strip_comments**：注释与串内形状处理，避免误匹配。
-        #. **drop_alwaysish**：``always``/``initial``/``final``、``task``、``specify``、``generate`` 等整块。
+        #. **drop_alwaysish**：``always``/``initial``/``final``、``task``、``specify`` 等整块（**不**去掉 ``generate``）。
         #. **strip_decl_noise**：parameter、assign 与 wire/reg/logic 等（可跨多行至顶层 ``;``）；port 方向（input/output/inout/ref）单行弱化；若干 `` ` `` 编译指令整行。
         #. **strip_module_ports**：各 module 体内去掉端口头。
         #. **scan_input**：已识别例化的端口表内置空白，再送入 ``scan_verilog_body``。
@@ -407,8 +389,8 @@ def squeeze_pipeline_for_dependency_scan(
 def squeeze_for_dependency_scan(src: str) -> str:
     """按固定顺序压缩文本，去掉与例化无关的干扰后再做端口剥离与例化端口骨架化。
 
-    顺序为：去注释 → 去过程块（含 **always** 全家、**task**、**specify**、**generate…endgenerate** 等；
-    **generate** 体内例化不再抽取）→ 声明/指令行噪声（**assign** 与 **wire/reg/logic** 等可多行直至顶层 ``;``；**input/output** 端口表仍逐行弱化）→ module 端口头 → 端口表空白化；输出供 ``scan_verilog_body`` 使用。
+    顺序为：去注释 → 去过程块（含 **always** 全家、**task**、**specify** 等；**保留 generate…endgenerate**，
+    体内例化参与扫描）→ 声明/指令行噪声（**assign** 与 **wire/reg/logic** 等可多行直至顶层 ``;``；**input/output** 端口表仍逐行弱化）→ module 端口头 → 端口表空白化；输出供 ``scan_verilog_body`` 使用。
     """
     return squeeze_pipeline_for_dependency_scan(src)[-1]
 
