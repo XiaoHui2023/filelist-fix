@@ -30,6 +30,21 @@ class OnIncludeResolveMissAPI(BaseAPI):
     )
 
 
+class OnIncludeResolveAmbiguousAPI(BaseAPI):
+    """Emitted when fd finds multiple source files for one include target basename."""
+
+    from_file: Path = Field(description="Source file containing the `` `include`` line")
+    include_spec: str = Field(description="Include string from the directive")
+    candidate_paths: list[Path] = Field(description="All matching files under --source after exclude")
+
+
+class OnModuleResolveDuplicateAPI(BaseAPI):
+    """Emitted when fd/rg or parse finds one module name defined in more than one file."""
+
+    module_name: str = Field(description="Conflicting module or package name")
+    candidate_paths: list[Path] = Field(description="Each file that defines or matches the name")
+
+
 class OnModuleIndexInconsistentAPI(BaseAPI):
     """Emitted when a module maps to a file that is not yet in the parsed-files set."""
 

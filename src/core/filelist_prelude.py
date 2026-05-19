@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.bin_resolve import path_stat_sig
-from core.filelist_paths import format_listed_path
+from core.filelist_paths import format_incdir_line, format_listed_path
 from core.hdl_extensions import HD_SOURCE_EXTENSIONS
 from core.path_logical import logical_abs
 
@@ -75,13 +75,6 @@ def _resolve_path_token(host_dir: Path, token: str) -> Path:
     if raw.is_absolute():
         return logical_abs(raw)
     return logical_abs(host_dir / raw)
-
-
-def _format_incdir_line(inc_resolved: Path, output_path: Path, *, absolute: bool) -> str:
-    disp = format_listed_path(inc_resolved, output_path, absolute=absolute)
-    if " " in disp or disp.startswith("+"):
-        return f'+incdir+"{disp}"'
-    return f"+incdir+{disp}"
 
 
 def _format_define_line(key: str, value: str) -> str:
@@ -212,7 +205,7 @@ def _consume_one_filelist(
                 resolved = _resolve_incdir(path_log, inc)
                 outcome.incdirs.append(resolved)
                 outcome.head_lines.append(
-                    _format_incdir_line(resolved, output_path, absolute=path_absolute)
+                    format_incdir_line(resolved, output_path, absolute=path_absolute)
                 )
             continue
 

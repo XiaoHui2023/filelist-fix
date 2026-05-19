@@ -26,6 +26,15 @@
 
 - `OnIncludeResolveMissAPI`
 
+## sink.duplicate_fatal_sink
+
+include 或模块名在源树中命中多个文件、或解析阶段发现同名模块分属不同文件时：stderr **Error** 列出全部路径并提示 ``--exclude``，请求以非零状态结束，不写 filelist。
+
+**对应 API**
+
+- `OnIncludeResolveAmbiguousAPI`
+- `OnModuleResolveDuplicateAPI`
+
 ## sink.filelist_write_sink
 
 将已确定的完整 filelist 按用户指定的输出路径写出为最终文件。

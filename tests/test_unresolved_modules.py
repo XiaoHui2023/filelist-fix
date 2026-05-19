@@ -7,6 +7,8 @@ import impl  # noqa: F401 — register sinks
 from runtime.context import AppContext
 from runtime.filelist_app import FilelistApplication
 
+from tests.conftest import bind_module_find
+
 
 def test_unresolved_modules_ordered_dedup(tmp_path: Path) -> None:
     src = tmp_path / "src"
@@ -28,12 +30,10 @@ def test_unresolved_modules_ordered_dedup(tmp_path: Path) -> None:
         ctx=ctx,
     )
 
-    def fake_find(module: str, roots: object) -> Path | None:
-        if module == "top":
-            return src / "top.v"
-        return None
-
-    app._tools.find_file = fake_find
+    bind_module_find(
+        app._tools,
+        lambda module: src / "top.v" if module == "top" else None,
+    )
 
     rb = app.run()
     assert rb.state.unresolved_modules == ["missing_a", "missing_b"]
@@ -61,12 +61,12 @@ def test_shared_missing_module_find_file_once(tmp_path: Path) -> None:
         ctx=ctx,
     )
     find_calls: list[str] = []
+    hits = {"mod_a": src / "a.v", "mod_b": src / "b.v"}
 
-    def fake_find(module: str, roots: object) -> Path | None:
-        find_calls.append(module)
-        hits = {"mod_a": src / "a.v", "mod_b": src / "b.v"}
-        return hits.get(module)
-
-    app._tools.find_file = fake_find
+    bind_module_find(
+        app._tools,
+        lambda module: hits.get(module),
+        track=find_calls,
+    )
     app.run()
     assert find_calls.count("ghost") == 1

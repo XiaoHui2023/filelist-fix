@@ -4,12 +4,16 @@ import re
 from pathlib import Path
 from typing import Any
 
-from api.events.filelist_build import OnIncludeResolveMissAPI
+from api.events.filelist_build import (
+    OnIncludeResolveAmbiguousAPI,
+    OnIncludeResolveMissAPI,
+)
 from api.resolve.verilog_text import (
     JoinContinuedLinesAPI,
     ScanVerilogForDependenciesAPI,
     SqueezeForDependencyScanAPI,
 )
+from core.filelist_paths import format_incdir_line
 from core.path_logical import logical_abs
 from verilog_text.preproc import PreprocDirectiveParser
 from verilog_text.scan import scan_verilog_body
@@ -34,6 +38,71 @@ def resolve_include_path(rel: str, current_file: Path, incdirs: list[Path]) -> P
         if c2.is_file():
             return c2
     return None
+
+
+def incdir_for_resolved_include(candidate: Path, spec: str) -> Path:
+    """由 fd 命中的绝对文件路径反推应加入的 ``+incdir+`` 目录。"""
+    n = len(Path(spec).parts)
+    if n < 1:
+        return logical_abs(candidate.parent)
+    return logical_abs(candidate.parents[n - 1])
+
+
+def _incdir_already_listed(incdirs: list[Path], inc: Path) -> bool:
+    key = logical_abs(inc)
+    return any(logical_abs(d) == key for d in incdirs)
+
+
+def _note_discovered_incdir(ctx: Any, host_file: Path, inc_dir: Path) -> None:
+    st = getattr(ctx, "session_state", None)
+    output = getattr(ctx, "output_path", None)
+    if st is None or output is None:
+        return
+    abs_host = logical_abs(host_file)
+    line = format_incdir_line(
+        inc_dir,
+        output,
+        absolute=bool(getattr(ctx, "path_absolute", False)),
+    )
+    bucket = st.incdir_lines_before.setdefault(abs_host, [])
+    if line not in bucket:
+        bucket.append(line)
+
+
+def try_fd_resolve_include(
+    spec: str,
+    current_file: Path,
+    incdirs: list[Path],
+    ctx: Any,
+) -> Path | None:
+    """当前 incdir 未命中时，用 fd 在 --source 中按文件名查找并追加 incdir。"""
+    tools = getattr(ctx, "module_resolve_tools", None)
+    roots = getattr(ctx, "search_roots", None)
+    if tools is None or not roots:
+        return None
+    filename = Path(spec).name
+    if not filename:
+        return None
+    candidates = tools.fd_search_by_filename(
+        filename,
+        roots,
+        getattr(ctx, "exclude_paths", None),
+    )
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        ctx.fire(
+            OnIncludeResolveAmbiguousAPI,
+            from_file=current_file,
+            include_spec=spec,
+            candidate_paths=candidates,
+        )
+        return None
+    inc = incdir_for_resolved_include(candidates[0], spec)
+    if not _incdir_already_listed(incdirs, inc):
+        incdirs.append(inc)
+        _note_discovered_incdir(ctx, current_file, inc)
+    return resolve_include_path(spec, current_file, incdirs)
 
 
 def flatten_active_text(
@@ -69,13 +138,15 @@ def flatten_active_text(
                 target = inc.group(1) or inc.group(2) or ""
                 spec = target.strip()
                 child = resolve_include_path(spec, path, incdirs)
+                if child is None and ctx is not None:
+                    child = try_fd_resolve_include(spec, path, incdirs, ctx)
                 if child:
                     sub = flatten_active_text(child, preproc, incdirs, stack, depth + 1, ctx)
                     if ctx is not None and getattr(ctx, "exit_code", None):
                         break
                     if sub:
                         chunks.append(sub)
-                elif ctx is not None:
+                elif ctx is not None and not getattr(ctx, "exit_code", None):
                     ctx.note_include_miss(path, spec)
                 continue
             if preproc.line_is_active_source():

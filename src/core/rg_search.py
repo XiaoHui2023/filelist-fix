@@ -16,18 +16,18 @@ class RgModuleSearch:
         self._rg = rg_exe
 
     def _pattern(self, module_name: str) -> str:
-        # Verilog UDP 与用户模块例化同形；定义关键字为 ``primitive``，须与 ``module`` 一并检索。
         esc = re.escape(module_name)
         return rf"(?:module|primitive|package)\s+{esc}\b"
 
-    def search(
+    def search_all(
         self,
         module_name: str,
         roots: list[Path],
         excludes: list[Path] | None = None,
-    ) -> Path | None:
-        best: Path | None = None
+    ) -> list[Path]:
         excl = excludes or []
+        seen: set[Path] = set()
+        hits: list[Path] = []
         pat = self._pattern(module_name)
         for root in roots:
             cmd = [self._rg, "-l", "-S", "-e", pat]
@@ -44,7 +44,7 @@ class RgModuleSearch:
                     check=False,
                 )
             except FileNotFoundError:
-                return None
+                return []
             if cp.returncode not in (0, 1):
                 continue
             for line in (cp.stdout or "").splitlines():
@@ -54,6 +54,21 @@ class RgModuleSearch:
                 cand = logical_abs(Path(line))
                 if path_is_excluded(cand, excl):
                     continue
-                if best is None or len(cand.parts) < len(best.parts):
-                    best = cand
-        return best
+                key = cand.resolve()
+                if key in seen:
+                    continue
+                seen.add(key)
+                hits.append(cand)
+        hits.sort(key=lambda p: (len(p.parts), str(p)))
+        return hits
+
+    def search(
+        self,
+        module_name: str,
+        roots: list[Path],
+        excludes: list[Path] | None = None,
+    ) -> Path | None:
+        hits = self.search_all(module_name, roots, excludes)
+        if len(hits) == 1:
+            return hits[0]
+        return None

@@ -26,3 +26,11 @@ def format_listed_path(source_file: Path, output_file: Path, *, absolute: bool) 
     except (OSError, ValueError):
         return str(listed)
     return Path(rel).as_posix()
+
+
+def format_incdir_line(inc_resolved: Path, output_file: Path, *, absolute: bool) -> str:
+    """将已解析的 ``+incdir+`` 目录格式化为写入 filelist 的一行。"""
+    disp = format_listed_path(inc_resolved, output_file, absolute=absolute)
+    if " " in disp or disp.startswith("+"):
+        return f'+incdir+"{disp}"'
+    return f"+incdir+{disp}"

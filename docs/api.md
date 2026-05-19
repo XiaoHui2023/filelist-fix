@@ -14,8 +14,18 @@
 
 ### OnIncludeResolveMissAPI
 
-- **调用时机**：展平源码时，活动分支内某条 `` `include`` 在当前文件目录与 ``+incdir+`` 下均无法解析到已有文件时（**同一 (来源文件, include 串) 至多一次**）
+- **调用时机**：展平源码时，活动分支内某条 `` `include`` 在当前目录、``+incdir+`` 与 fd 按文件名自动检索后仍无法解析时（**同一 (来源文件, include 串) 至多一次**）
 - **说明**：某源文件展平结束后，将其上全部未解析的 include 合并为一条 stderr **Error**（**`include_specs`** + **`from_file`**），并请求以非零状态结束；不写 **`-o`** 产物
+
+### OnIncludeResolveAmbiguousAPI
+
+- **调用时机**：fd 在 ``--source`` 下为同一 include 目标 basename 找到多个未排除文件时
+- **说明**：stderr **Error** 列出全部命中路径，提示用 ``--exclude`` 屏蔽多余项；不写 **`-o`** 产物
+
+### OnModuleResolveDuplicateAPI
+
+- **调用时机**：fd→rg 为同一模块名返回多个定义文件，或解析后发现同名模块已映射到其它文件时
+- **说明**：stderr **Error** 列出冲突路径，提示用 ``--exclude``；不写 **`-o`** 产物
 
 ### OnModuleIndexInconsistentAPI
 

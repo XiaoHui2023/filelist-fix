@@ -12,6 +12,7 @@ from api.events.filelist_build import (
     OnClosureEmptyAPI,
     OnFilelistWriteAPI,
     OnModuleIndexInconsistentAPI,
+    OnModuleResolveDuplicateAPI,
     OnModuleResolveMissAPI,
     OnPreludeLoadedAPI,
     OnSessionEndAPI,
@@ -61,6 +62,7 @@ class FilelistSessionState:
     parsed_resolved: set[Path] = field(default_factory=set)
     defines: dict[str, str] = field(default_factory=dict)
     incdirs: list[Path] = field(default_factory=list)
+    incdir_lines_before: dict[Path, list[str]] = field(default_factory=dict)
     unresolved_modules: list[str] = field(default_factory=list)
     _unresolved_seen: set[str] = field(default_factory=set, init=False, repr=False, compare=False)
     _logical_by_resolved: dict[Path, Path] = field(
@@ -110,11 +112,27 @@ class ModuleResolveTools:
         self._rg = RgModuleSearch(rg_exe)
         self._excludes = excludes or []
 
+    def find_all(self, module: str, roots: list[Path]) -> list[Path]:
+        fd_hits = self._fd.search_all(module, roots, self._excludes)
+        if len(fd_hits) > 1:
+            return fd_hits
+        if len(fd_hits) == 1:
+            return fd_hits
+        return self._rg.search_all(module, roots, self._excludes)
+
+    def fd_search_by_filename(
+        self,
+        filename: str,
+        roots: list[Path],
+        excludes: list[Path] | None = None,
+    ) -> list[Path]:
+        return self._fd.search_by_filename(filename, roots, excludes or self._excludes)
+
     def find_file(self, module: str, roots: list[Path]) -> Path | None:
-        hit = self._fd.search(module, roots, self._excludes)
-        if hit is not None:
-            return hit
-        return self._rg.search(module, roots, self._excludes)
+        hits = self.find_all(module, roots)
+        if len(hits) == 1:
+            return hits[0]
+        return None
 
 
 class FilelistApplication:
@@ -167,10 +185,42 @@ class FilelistApplication:
                 else:
                     self._save.invalidate_module_hints_for_stale_file(hp)
                     return hp
-        found = self._tools.find_file(mod, self._search_roots)
-        if found is None:
+        hits = self._tools.find_all(mod, self._search_roots)
+        if len(hits) > 1:
+            ctx = self._ctx
+            ctx.fire(
+                OnModuleResolveDuplicateAPI,
+                module_name=mod,
+                candidate_paths=hits,
+            )
             return None
-        return logical_abs(found)
+        if len(hits) == 1:
+            return logical_abs(hits[0])
+        return None
+
+    def _register_defined_modules(
+        self,
+        ctx: Any,
+        st: FilelistSessionState,
+        hit: Path,
+        defs: list[str],
+        *,
+        also_map: list[str] | None = None,
+    ) -> bool:
+        """将定义名写入 module_to_file；若同名已映射到其它文件则发重复错误并返回 False。"""
+        names = list(dict.fromkeys([*(also_map or []), *defs]))
+        for name in names:
+            prev = st.module_to_file.get(name)
+            if prev is not None and prev.resolve() != hit.resolve():
+                ctx.fire(
+                    OnModuleResolveDuplicateAPI,
+                    module_name=name,
+                    candidate_paths=[prev, hit],
+                )
+                return False
+        for name in names:
+            st.module_to_file.setdefault(name, hit)
+        return True
 
     def _emit_filelist_file(self, ctx: Any, rb: ResolvedBuild) -> None:
         ctx.fire(
@@ -181,10 +231,12 @@ class FilelistApplication:
             message=f"write · {self._output.name}",
         )
         lines = [h.rstrip("\n") for h in rb.head_lines]
-        lines.extend(
-            format_listed_path(p, self._output, absolute=self._path_absolute)
-            for p in rb.ordered_paths
-        )
+        for p in rb.ordered_paths:
+            for inc_line in rb.state.incdir_lines_before.get(p, ()):
+                lines.append(inc_line.rstrip("\n"))
+            lines.append(
+                format_listed_path(p, self._output, absolute=self._path_absolute)
+            )
         text = "\n".join(lines) + "\n"
         ctx.fire(OnFilelistWriteAPI, output_path=self._output, text=text)
 
@@ -217,6 +269,12 @@ class FilelistApplication:
         st = FilelistSessionState()
         st.defines.update(pre.defines)
         st.incdirs.extend(pre.incdirs)
+        ctx.search_roots = self._search_roots
+        ctx.exclude_paths = self._exclude_paths
+        ctx.session_state = st
+        ctx.output_path = self._output
+        ctx.path_absolute = self._path_absolute
+        ctx.module_resolve_tools = self._tools
         self._save = FileParseArchive(
             self._save_path,
             defines=st.defines,
@@ -286,6 +344,8 @@ class FilelistApplication:
                     log.debug("search definition for module %r", mod)
 
                 hit = self._locate_module_file(mod)
+                if getattr(ctx, "exit_code", None):
+                    break
                 if hit is None:
                     st.note_unresolved(mod)
                     ctx.fire(OnModuleResolveMissAPI, module_name=mod)
@@ -314,9 +374,10 @@ class FilelistApplication:
                             mod,
                             lines_block("defined", defs),
                         )
-                    for d in defs:
-                        st.module_to_file.setdefault(d, hit)
-                    st.module_to_file.setdefault(mod, hit)
+                    if not self._register_defined_modules(
+                        ctx, st, hit, defs, also_map=[mod]
+                    ):
+                        break
                     self._save.upsert_module_hints(hit, defs, [mod])
                     continue
 
@@ -366,8 +427,8 @@ class FilelistApplication:
 
                 self._save.upsert_module_hints(hit, defs, [mod])
 
-                for d in defs:
-                    st.module_to_file.setdefault(d, hit)
+                if not self._register_defined_modules(ctx, st, hit, defs, also_map=[mod]):
+                    break
                 st.file_refs[hit] = list(refs)
                 st.note_inode_parsed(hit)
                 for r in refs:
