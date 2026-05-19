@@ -28,6 +28,11 @@ class AppContext:
         self.dependency_debug_dump = dependency_debug_dump
         self.include_resolve_miss_seen: set[tuple[str, str]] = set()
         self.include_resolve_miss_order: list[tuple[str, Path]] = []
+        self.exit_code: int | None = None
+
+    def request_exit(self, code: int) -> None:
+        """请求以给定状态码结束进程（由 ``__main__`` 在编排返回后 ``sys.exit``）。"""
+        self.exit_code = code
 
     def fire(self, api: type[TApi], **kwargs: Any) -> TApi:
         """触发已注册的同步回调链并返回载荷实例。"""

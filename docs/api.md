@@ -15,7 +15,7 @@
 ### OnIncludeResolveMissAPI
 
 - **调用时机**：展平源码时，活动分支内某条 `` `include`` 在当前文件目录与 ``+incdir+`` 下均无法解析到已有文件时（**同一 (来源文件, include 串) 至多一次**）
-- **说明**：跳过展开该 include；其余行仍参与后续扫描。告警文案含 **`include_spec`** 与含该指令的 **`from_file`** 路径
+- **说明**：stderr 打印 **Error**（含 **`include_spec`** 与 **`from_file`**），并请求以非零状态结束；不写 **`-o`** 产物
 
 ### OnModuleIndexInconsistentAPI
 

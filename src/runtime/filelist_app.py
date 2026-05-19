@@ -23,11 +23,7 @@ from core.bin_resolve import ToolBinaryLocator, normalize_search_roots
 from core.dep_order import prerequisite_edges, topo_prereq_first
 from core.fd_search import FdModuleSearch
 from core.filelist_paths import format_listed_path
-from core.filelist_prelude import (
-    PreludeOutcome,
-    load_prelude_files_with_signature,
-    prelude_signature_from_files,
-)
+from core.filelist_prelude import PreludeOutcome, load_prelude_files_with_signature
 from core.path_logical import logical_abs
 from core.rg_search import RgModuleSearch
 from core.source_flatten import extract_dependencies_from_file
@@ -201,7 +197,7 @@ class FilelistApplication:
         incs = json.loads(c.raw_includes)
         return defs, refs, incs
 
-    def run(self) -> ResolvedBuild:
+    def run(self) -> ResolvedBuild | None:
         """收集依赖闭包、排序并发事件；写出 filelist 与解析复用释放由 impl 消费。"""
         ctx = self._ctx
         try:
@@ -209,17 +205,23 @@ class FilelistApplication:
         finally:
             ctx.fire(OnSessionEndAPI)
 
-    def _run_orchestration(self, ctx: Any) -> ResolvedBuild:
+    def _run_orchestration(self, ctx: Any) -> ResolvedBuild | None:
         if self._prelude_paths:
-            pre, prelude_sig = load_prelude_files_with_signature(
+            pre, _ = load_prelude_files_with_signature(
                 self._prelude_paths,
                 output_path=self._output,
                 path_absolute=self._path_absolute,
             )
         else:
             pre = PreludeOutcome()
-            prelude_sig = prelude_signature_from_files([])
-        self._save = FileParseArchive(self._save_path, prelude_signature=prelude_sig)
+        st = FilelistSessionState()
+        st.defines.update(pre.defines)
+        st.incdirs.extend(pre.incdirs)
+        self._save = FileParseArchive(
+            self._save_path,
+            defines=st.defines,
+            incdirs=st.incdirs,
+        )
         ctx.save = self._save
         ctx.fire(
             OnPreludeLoadedAPI,
@@ -227,10 +229,6 @@ class FilelistApplication:
             define_count=len(pre.defines),
             incdir_count=len(pre.incdirs),
         )
-        st = FilelistSessionState()
-        st.defines.update(pre.defines)
-        st.incdirs.extend(pre.incdirs)
-
         log = getattr(ctx, "logger", None)
         if log is not None and log.isEnabledFor(logging.DEBUG):
             log.debug(
@@ -252,6 +250,8 @@ class FilelistApplication:
         )
 
         while q:
+            if getattr(ctx, "exit_code", None):
+                break
             mod = q.popleft()
             try:
                 _fire_closure_progress(
@@ -305,6 +305,8 @@ class FilelistApplication:
                         defs, _, _ = extract_dependencies_from_file(
                             hit, st.incdirs, st.defines, ctx=ctx
                         )
+                        if getattr(ctx, "exit_code", None):
+                            break
                     if log is not None and log.isEnabledFor(logging.DEBUG):
                         log.debug(
                             "reuse parsed file %s for module %r\n%s",
@@ -337,7 +339,12 @@ class FilelistApplication:
                     defs, refs, incs = extract_dependencies_from_file(
                         hit, st.incdirs, st.defines, ctx=ctx
                     )
+                    if getattr(ctx, "exit_code", None):
+                        break
                     self._save.put(hit, defs, refs, incs)
+
+                if getattr(ctx, "exit_code", None):
+                    break
 
                 if log is not None and log.isEnabledFor(logging.DEBUG):
                     log.debug(
@@ -379,6 +386,9 @@ class FilelistApplication:
                         "closure · done",
                         in_flight=False,
                     )
+
+        if getattr(ctx, "exit_code", None):
+            return None
 
         if not st.file_refs:
             ctx.fire(OnClosureEmptyAPI)

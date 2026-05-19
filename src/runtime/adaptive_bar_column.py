@@ -8,6 +8,7 @@ from rich.progress import ProgressColumn, Task
 from rich.progress_bar import ProgressBar
 from rich.style import Style
 from rich.table import Column
+from rich.text import Text
 
 _RED = ColorTriplet(215, 55, 55)
 _YELLOW = ColorTriplet(255, 210, 55)
@@ -30,6 +31,18 @@ def _ratio_from_task(task: Task) -> float:
     if task.finished:
         return 1.0
     return 0.0
+
+
+class CompletedTotalColumn(ProgressColumn):
+    """右对齐显示 ``completed/total`` 计数，替代百分比。"""
+
+    def render(self, task: Task) -> Text:
+        c = int(task.completed)
+        if task.total is None:
+            body = f"{c}/?"
+        else:
+            body = f"{c}/{int(task.total)}"
+        return Text(body, style="grey70", justify="right")
 
 
 class AdaptiveHueBarColumn(ProgressColumn):

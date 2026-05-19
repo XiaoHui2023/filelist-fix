@@ -11,13 +11,20 @@
 
 ## sink.warnings_sink
 
-将模块未找到、`` `include`` 未找到、内部索引不一致等情况转为面向人的告警或说明，避免无声跳过。模块定义未命中时写 **WARNING**（`Not found module "…"`）；include 未命中时写 **`Not found include "…" in file "…"`**（标明含该指令的源路径，与 **`-l`** 文件日志一致）。
+将模块未找到、内部索引不一致等情况转为面向人的告警或说明，避免无声跳过。模块定义未命中时写 **WARNING**（`Not found module "…"`）。
 
 **对应 API**
 
 - `OnModuleResolveMissAPI`
-- `OnIncludeResolveMissAPI`
 - `OnModuleIndexInconsistentAPI`
+
+## sink.include_fatal_sink
+
+活动分支内无法解析的 `` `include`` 视为致命：stderr 打印 **Error**（`Not found include "…" in file "…"`），请求以非零状态结束，不写 filelist。
+
+**对应 API**
+
+- `OnIncludeResolveMissAPI`
 
 ## sink.filelist_write_sink
 

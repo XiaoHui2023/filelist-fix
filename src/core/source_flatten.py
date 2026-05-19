@@ -104,6 +104,8 @@ def extract_dependencies_from_file(
     """返回该文件在宏环境下的已定义模块、引用模块与 include 路径串。"""
     pre = PreprocDirectiveParser(dict(initial_defines))
     flat = flatten_active_text(path, pre, incdirs, set(), 0, ctx)
+    if ctx is not None and getattr(ctx, "exit_code", None):
+        return [], [], []
     if ctx is not None:
         dbg = getattr(ctx, "dependency_debug_dump", None)
         if dbg is not None:

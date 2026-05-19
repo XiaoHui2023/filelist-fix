@@ -6,22 +6,22 @@ from pathlib import Path
 from rich.color import Color
 from rich.color_triplet import ColorTriplet
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TaskProgressColumn, TextColumn, TimeElapsedColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.style import Style
 from rich.table import Column
 from rich.text import Text
 
 import impl  # noqa: F401  — register sinks
 from core.dependency_debug_dump import DependencyDebugDump
-from runtime.adaptive_bar_column import AdaptiveHueBarColumn
+from runtime.adaptive_bar_column import AdaptiveHueBarColumn, CompletedTotalColumn
 from runtime.cli_parser import build_parser, flatten_append_groups
 from runtime.context import AppContext
 from runtime.filelist_app import FilelistApplication
 from runtime.logging_setup import configure_cli_logging
 
-# 进度条：HueBar（按完成比例红→黄→绿）；宽度参与描述列留白计算（含百分比列）。
+# 进度条：HueBar（按完成比例红→黄→绿）；宽度参与描述列留白计算（含 completed/total 列）。
 _PROGRESS_BAR_WIDTH = 28
-_PROGRESS_PCT_COL = Column(min_width=5, max_width=5, justify="right")
+_PROGRESS_COUNT_COL = Column(min_width=7, max_width=9, justify="right")
 _WARN_STYLE = Style(color=Color.from_triplet(ColorTriplet(255, 220, 60)))
 
 
@@ -31,8 +31,8 @@ def _description_table_column(console: Console, bar_width: int) -> Column:
     if w is None or w < 30:
         w = 80
     bw = max(1, int(bar_width))
-    # spinner + 条形 + 百分比列 + 耗时 + 列间留白
-    reserved = 3 + bw + 5 + 11 + 10
+    # spinner + 条形 + completed/total 列 + 耗时 + 列间留白
+    reserved = 3 + bw + 9 + 11 + 10
     desc_max = max(16, w - reserved)
     # 短终端时 min 不超过 max，避免 min_width>max_width
     min_w = min(52, desc_max)
@@ -60,10 +60,7 @@ def main(argv: list[str] | None = None) -> int:
             table_column=desc_col,
         ),
         AdaptiveHueBarColumn(bar_width=_PROGRESS_BAR_WIDTH),
-        TaskProgressColumn(
-            text_format="[grey70]{task.percentage:>3.0f}%[/grey70]",
-            table_column=_PROGRESS_PCT_COL,
-        ),
+        CompletedTotalColumn(table_column=_PROGRESS_COUNT_COL),
         TimeElapsedColumn(table_column=elapsed_col),
         console=console,
         transient=True,
@@ -93,7 +90,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         rb = app.run()
 
-    print(f"Wrote filelist: {args.output.resolve()}", file=sys.stderr)
+    if ctx.exit_code is not None:
+        return ctx.exit_code
+    if rb is None:
+        return 1
+
+    print(f"output: {args.output.resolve()}", file=sys.stderr)
     for name in rb.state.unresolved_modules:
         line = Text()
         line.append("Warning", style=_WARN_STYLE)
@@ -101,13 +103,6 @@ def main(argv: list[str] | None = None) -> int:
         console.print(line)
         if args.log_file is not None:
             log.warning('Not found module "%s"', name)
-    for spec, from_path in ctx.include_resolve_miss_order:
-        line = Text()
-        line.append("Warning", style=_WARN_STYLE)
-        line.append(f': Not found include "{spec}" in file "{from_path}"')
-        console.print(line)
-        if args.log_file is not None:
-            log.warning('Not found include "%s" in file "%s"', spec, from_path)
     return 0
 
 
