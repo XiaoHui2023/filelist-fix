@@ -5,6 +5,8 @@ from typing import Any, TypeVar
 
 from callback import Callback
 
+from core.path_logical import logical_abs
+
 TApi = TypeVar("TApi", bound=Callback)
 
 
@@ -28,7 +30,25 @@ class AppContext:
         self.dependency_debug_dump = dependency_debug_dump
         self.include_resolve_miss_seen: set[tuple[str, str]] = set()
         self.include_resolve_miss_order: list[tuple[str, Path]] = []
+        self._include_miss_specs_by_file: dict[str, list[str]] = {}
         self.exit_code: int | None = None
+
+    def note_include_miss(self, from_file: Path, spec: str) -> None:
+        """记录一次未解析的 `` `include``（同一文件内同一 spec 只记一次）。"""
+        path = logical_abs(from_file)
+        key = (str(path), spec)
+        if key in self.include_resolve_miss_seen:
+            return
+        self.include_resolve_miss_seen.add(key)
+        self.include_resolve_miss_order.append((spec, path))
+        fp = str(path)
+        bucket = self._include_miss_specs_by_file.setdefault(fp, [])
+        if spec not in bucket:
+            bucket.append(spec)
+
+    def pop_include_miss_specs(self, from_file: Path) -> list[str]:
+        """取出并清除某源文件上已收集、尚未上报的 include spec 列表。"""
+        return self._include_miss_specs_by_file.pop(str(logical_abs(from_file)), [])
 
     def request_exit(self, code: int) -> None:
         """请求以给定状态码结束进程（由 ``__main__`` 在编排返回后 ``sys.exit``）。"""

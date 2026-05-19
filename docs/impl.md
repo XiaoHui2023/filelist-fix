@@ -20,7 +20,7 @@
 
 ## sink.include_fatal_sink
 
-活动分支内无法解析的 `` `include`` 视为致命：stderr 打印 **Error**（`Not found include "…" in file "…"`），请求以非零状态结束，不写 filelist。
+活动分支内无法解析的 `` `include`` 视为致命：同一源文件上全部未命中合并为一条 stderr **Error**（`Not found include "…", "…" in file "…"`），请求以非零状态结束，不写 filelist。
 
 **对应 API**
 

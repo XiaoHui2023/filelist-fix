@@ -22,10 +22,12 @@ class OnModuleResolveMissAPI(BaseAPI):
 
 
 class OnIncludeResolveMissAPI(BaseAPI):
-    """Emitted when an active `` `include`` cannot be resolved (at most once per (from_file, spec) per run)."""
+    """Emitted after flattening a file that had one or more unresolvable active `` `include`` directives."""
 
-    include_spec: str = Field(description="Include path as written in the directive (after stripping)")
-    from_file: Path = Field(description="Source file containing that `` `include`` line")
+    from_file: Path = Field(description="Source file containing those `` `include`` lines")
+    include_specs: list[str] = Field(
+        description="Distinct include strings that could not be resolved, in first-seen source order",
+    )
 
 
 class OnModuleIndexInconsistentAPI(BaseAPI):

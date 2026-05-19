@@ -71,24 +71,26 @@ def flatten_active_text(
                 child = resolve_include_path(spec, path, incdirs)
                 if child:
                     sub = flatten_active_text(child, preproc, incdirs, stack, depth + 1, ctx)
+                    if ctx is not None and getattr(ctx, "exit_code", None):
+                        break
                     if sub:
                         chunks.append(sub)
                 elif ctx is not None:
-                    key = (str(path), spec)
-                    if key not in ctx.include_resolve_miss_seen:
-                        ctx.include_resolve_miss_seen.add(key)
-                        ctx.include_resolve_miss_order.append((spec, path))
-                        ctx.fire(
-                            OnIncludeResolveMissAPI,
-                            include_spec=spec,
-                            from_file=path,
-                        )
+                    ctx.note_include_miss(path, spec)
                 continue
             if preproc.line_is_active_source():
                 chunks.append(line)
         out = "\n".join(chunks)
         if dbg is not None:
             dbg.write_text(path, "02_flatten_merged.txt", out)
+        if ctx is not None and not getattr(ctx, "exit_code", None):
+            pending = ctx.pop_include_miss_specs(path)
+            if pending:
+                ctx.fire(
+                    OnIncludeResolveMissAPI,
+                    from_file=path,
+                    include_specs=pending,
+                )
         return out
     finally:
         stack.remove(path)
