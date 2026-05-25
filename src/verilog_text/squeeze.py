@@ -45,6 +45,32 @@ _ENDTASK_HEAD = re.compile(r"^\s*endtask\b")
 _EXTERN_TASK_HEAD = re.compile(r"^\s*extern\s+task\b")
 _SPECIFY_HEAD = re.compile(r"^\s*specify\b")
 _ENDSPECIFY_HEAD = re.compile(r"^\s*endspecify\b")
+_PROTECTED_START = re.compile(r"^\s*`protected\b", re.IGNORECASE)
+_PROTECT_START = re.compile(r"^\s*`protect\b", re.IGNORECASE)
+_END_PROTECT = re.compile(r"^\s*`endprotect(?:ed)?\b", re.IGNORECASE)
+
+
+def _line_opens_protect_region(line: str) -> bool:
+    if _PROTECTED_START.match(line):
+        return True
+    return bool(_PROTECT_START.match(line))
+
+
+def strip_protected_regions(src: str) -> str:
+    """去掉 `` `protected``…`` `endprotected``（及 `` `protect``…`` `endprotect``）整块，不解析其中内容。"""
+    lines = src.splitlines(keepends=True)
+    out: list[str] = []
+    depth = 0
+    for line in lines:
+        if depth > 0:
+            if _END_PROTECT.match(line):
+                depth -= 1
+            continue
+        if _line_opens_protect_region(line):
+            depth = 1
+            continue
+        out.append(line)
+    return "".join(out)
 
 
 def strip_comments_preserve_strings(src: str) -> str:
@@ -390,14 +416,14 @@ def squeeze_pipeline_for_dependency_scan(
     Returns:
         (strip_comments, drop_alwaysish, strip_decl_noise, strip_module_ports, scan_input).
 
-        #. **strip_comments**：注释与串内形状处理，避免误匹配。
+        #. **strip_comments**：先去掉加密 **protected** 块，再做注释与串内形状处理，避免误匹配。
         #. **drop_alwaysish**：``always``/``initial``/``final``、``task``、``specify`` 等整块（**不**去掉 ``generate``）。
         #. **strip_decl_noise**：parameter、assign 与 wire/reg/logic 等（可跨多行至顶层 ``;``）；port 方向（input/output/inout/ref）单行弱化；若干 `` ` `` 编译指令整行。
         #. **strip_module_ports**：各 module 体内去掉端口头。
         #. **scan_input**：已识别例化的端口表内置空白，再送入 ``scan_verilog_body``。
     """
 
-    a = strip_comments_preserve_strings(src)
+    a = strip_comments_preserve_strings(strip_protected_regions(src))
     b = drop_alwaysish_blocks(a)
     c = strip_decl_noise_lines(b)
     d = strip_module_port_regions(c)
@@ -408,7 +434,7 @@ def squeeze_pipeline_for_dependency_scan(
 def squeeze_for_dependency_scan(src: str) -> str:
     """按固定顺序压缩文本，去掉与例化无关的干扰后再做端口剥离与例化端口骨架化。
 
-    顺序为：去注释 → 去过程块（含 **always** 全家、**task**、**specify** 等；**保留 generate…endgenerate**，
+    顺序为：去掉 **`` `protected`` / `` `protect``** 加密块 → 去注释 → 去过程块（含 **always** 全家、**task**、**specify** 等；**保留 generate…endgenerate**，
     体内例化参与扫描）→ 声明/指令行噪声（**assign** 与 **wire/reg/logic** 等可多行直至顶层 ``;``；**input/output** 端口表仍逐行弱化）→ module 端口头 → 端口表空白化；输出供 ``scan_verilog_body`` 使用。
     """
     return squeeze_pipeline_for_dependency_scan(src)[-1]

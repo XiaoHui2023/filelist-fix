@@ -22,6 +22,7 @@ from verilog_text.squeeze import (
     join_continued_lines,
     squeeze_for_dependency_scan,
     squeeze_pipeline_for_dependency_scan,
+    strip_protected_regions,
 )
 
 _INCLUDE = re.compile(r"^\s*`include\s+(?:\"([^\"]+)\"|<([^>]+)>)\s*(//.*)?$")
@@ -124,11 +125,13 @@ def flatten_active_text(
         dbg = getattr(ctx, "dependency_debug_dump", None) if ctx is not None else None
         raw = path.read_text(encoding="utf-8", errors="replace")
         if ctx is not None:
-            text = ctx.fire(JoinContinuedLinesAPI, raw_text=raw).joined_text
+            joined = ctx.fire(JoinContinuedLinesAPI, raw_text=raw).joined_text
         else:
-            text = join_continued_lines(raw)
+            joined = join_continued_lines(raw)
+        text = strip_protected_regions(joined)
         if dbg is not None:
-            dbg.write_text(path, "01_joined.txt", text)
+            dbg.write_text(path, "01_joined.txt", joined)
+            dbg.write_text(path, "01b_strip_protected.txt", text)
         chunks: list[str] = []
         for line in text.splitlines():
             if preproc.handle_directive_line(line):
