@@ -49,6 +49,10 @@ def test_debug_dump_writes_pipeline_files(tmp_path: Path) -> None:
     trace = (ddir / "05_instance_scan_trace.txt").read_text(encoding="utf-8")
     assert "MATCH" in trace
     assert "sub" in trace
+    index = (dbg_root / "module_ref_index.txt").read_text(encoding="utf-8")
+    assert "REFERENCED: sub" in index
+    assert str(logical_abs(src)) in index
+    assert "parent:      m" in index
 
 
 def test_debug_dump_clears_by_file_on_new_session(tmp_path: Path) -> None:

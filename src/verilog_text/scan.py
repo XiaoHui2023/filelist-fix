@@ -190,6 +190,35 @@ _PRIMITIVE_GATE_TYPES = frozenset(
 )
 _PRIMITIVE_GATE_TYPES_LOWER = frozenset(x.lower() for x in _PRIMITIVE_GATE_TYPES)
 
+# IEEE 1364 门级例化可选驱动强度括号内关键字（与门类型名 supply0/supply1 不同语义）
+_DRIVE_STRENGTH_KEYWORDS = frozenset(
+    {
+        "supply0",
+        "supply1",
+        "strong0",
+        "strong1",
+        "pull0",
+        "pull1",
+        "weak0",
+        "weak1",
+        "highz0",
+        "highz1",
+    }
+)
+_DRIVE_STRENGTH_KEYWORDS_LOWER = frozenset(x.lower() for x in _DRIVE_STRENGTH_KEYWORDS)
+
+
+def _paren_inner_is_drive_strength(s: str, open_pos: int, close_excl: int) -> bool:
+    """``s[open_pos]=='('``；``close_excl`` 为匹配 ``)`` 之后的下标。"""
+    inner = s[open_pos + 1 : close_excl - 1].strip()
+    if not inner:
+        return False
+    for part in inner.split(","):
+        tok = part.strip().lower()
+        if not tok or tok not in _DRIVE_STRENGTH_KEYWORDS_LOWER:
+            return False
+    return True
+
 
 def _is_primitive_gate_type(t: str) -> bool:
     """IEEE 1364 内建门类型名（不区分大小写，避免 ``NOT`` 等误入闭包）。"""
@@ -479,8 +508,10 @@ class _ModuleInstSpan:
     port_close_excl: int
 
 
-def _try_parse_module_instantiation_span(s: str, pos: int, self_mod: str) -> _ModuleInstSpan | None:
-    """从 ``pos`` 起解析命名/匿名例化至结束分号；失败返回 None。"""
+def _try_parse_module_instantiation_detail(
+    s: str, pos: int, self_mod: str
+) -> tuple[_ModuleInstSpan, str | None] | None:
+    """从 ``pos`` 起解析例化；返回 (跨度, 实例名或 None 表示匿名)。"""
     n = len(s)
     i = _skip_ws_any(s, pos)
     m = _ID_HEAD.match(s, i)
@@ -498,13 +529,39 @@ def _try_parse_module_instantiation_span(s: str, pos: int, self_mod: str) -> _Mo
         i = _skip_balanced_parens(s, i)
         i = _skip_ws_any(s, i)
     if i < n and s[i] == "(":
-        port_open = i
+        paren_open = i
         i = _skip_balanced_parens(s, i)
-        port_close_excl = i
+        paren_close_excl = i
         i = _skip_ws_any(s, i)
-        if i >= n or s[i] != ";":
+        if i >= n:
             return None
-        return _ModuleInstSpan(t, i + 1, port_open, port_close_excl)
+        if s[i] == ";":
+            return (_ModuleInstSpan(t, i + 1, paren_open, paren_close_excl), None)
+        if _is_primitive_gate_type(t) and _paren_inner_is_drive_strength(
+            s, paren_open, paren_close_excl
+        ):
+            if s[i] == "(":
+                port_open = i
+                i = _skip_balanced_parens(s, i)
+                port_close_excl = i
+                i = _skip_ws_any(s, i)
+                if i >= n or s[i] != ";":
+                    return None
+                return (_ModuleInstSpan(t, i + 1, port_open, port_close_excl), None)
+            m2 = _ID_HEAD.match(s, i)
+            if m2 and _identifier_allowed_as_instance_name(m2.group(1)):
+                inst = m2.group(1)
+                i = _skip_ws_any(s, m2.end())
+                if i >= n or s[i] != "(":
+                    return None
+                port_open = i
+                i = _skip_balanced_parens(s, i)
+                port_close_excl = i
+                i = _skip_ws_any(s, i)
+                if i >= n or s[i] != ";":
+                    return None
+                return (_ModuleInstSpan(t, i + 1, port_open, port_close_excl), inst)
+        return None
     m2 = _ID_HEAD.match(s, i)
     if not m2:
         return None
@@ -520,7 +577,13 @@ def _try_parse_module_instantiation_span(s: str, pos: int, self_mod: str) -> _Mo
     i = _skip_ws_any(s, i)
     if i >= n or s[i] != ";":
         return None
-    return _ModuleInstSpan(t, i + 1, port_open, port_close_excl)
+    return (_ModuleInstSpan(t, i + 1, port_open, port_close_excl), inst)
+
+
+def _try_parse_module_instantiation_span(s: str, pos: int, self_mod: str) -> _ModuleInstSpan | None:
+    """从 ``pos`` 起解析命名/匿名例化至结束分号；失败返回 None。"""
+    hit = _try_parse_module_instantiation_detail(s, pos, self_mod)
+    return hit[0] if hit else None
 
 
 def _collect_instance_refs_span_scan(body: str, self_mod: str, refs: list[str]) -> None:
@@ -629,12 +692,27 @@ def parse_instance_line_analysis(line: str, self_mod: str) -> tuple[str | None, 
         i = _skip_balanced_parens(raw, i)
         i = _consume_h_ws(raw, i)
     if i < len(raw) and raw[i] == "(":
+        paren_open = i
         i = _skip_balanced_parens(raw, i)
+        paren_close_excl = i
         i = _consume_h_ws(raw, i)
         if i < len(raw) and raw[i] == ";":
             if _is_primitive_gate_type(t):
                 return t, "内建门匿名例化：modtype [#(…)] ( … );"
             return t, "匿名例化：modtype [#(…)] ( … );"
+        if _is_primitive_gate_type(t) and _paren_inner_is_drive_strength(
+            raw, paren_open, paren_close_excl
+        ):
+            if i < len(raw) and raw[i] == "(":
+                if _is_primitive_gate_type(t):
+                    return t, "内建门驱动强度+匿名例化：modtype (strength) ( … );"
+                return t, "驱动强度+匿名例化"
+            m_ds = re.match(r"^([A-Za-z_]\w*)\b\s*\(", raw[i:])
+            if m_ds and _identifier_allowed_as_instance_name(m_ds.group(1)):
+                return (
+                    t,
+                    f"内建门驱动强度+命名例化：{t!r} (strength) {m_ds.group(1)!r} ( … );",
+                )
         return None, "括号后未以分号结束（可能是调用/表达式，不是例化）"
     m_inst = re.match(r"^([A-Za-z_]\w*)\b\s*\(", raw[i:])
     if not m_inst:

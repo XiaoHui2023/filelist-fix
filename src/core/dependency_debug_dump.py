@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 from core.path_logical import logical_abs
+from verilog_text.ref_index import ModuleRefSite, format_module_ref_index
 
 _README = """依赖解析调试输出（本目录由 --debug-dump 生成）
 
@@ -44,6 +45,10 @@ _README = """依赖解析调试输出（本目录由 --debug-dump 生成）
 12. 05_instance_scan_trace.txt — 各 module 体内及全文件 bind 第二遍的逐行判定：MATCH（模块类型与规则简述）、SKIP（未匹配原因）、BIND。
 
 说明：未指定 -l 时仍可写本目录；与文件日志无关。走解析缓存命中且未重新抽取依赖时，不会再次为同一文件写这些片段。
+
+## 根目录 module_ref_index.txt
+
+单文件汇总本轮所有已解析源的**模块/包引用位置**（按被引用名分组）。**module not found** 时在此文件搜索模块名，可看到 **source_file**、**parent** 模块、**instance**、**line**（对应各源 **03e_scan_input.txt** 行号）与 **excerpt**。与 **by_file/** 同步更新；缓存跳过解析的源不会追加记录。
 """
 
 
@@ -68,6 +73,8 @@ class DependencyDebugDump:
 
         self._resolved_dir: dict[str, Path] = {}
         self._stem_collided: set[str] = set()
+        self._ref_index_entries: list[tuple[str, str, ModuleRefSite]] = []
+        self._write_module_ref_index()
 
     @staticmethod
     def _hash16(path: Path) -> str:
@@ -151,3 +158,20 @@ class DependencyDebugDump:
         """写入给定源文件调试目录下的一个片段文件。"""
         d = self._target_dir(source_path)
         (d / filename).write_text(text, encoding="utf-8", newline="\n")
+
+    def record_ref_sites(self, source_path: Path, sites: list[ModuleRefSite]) -> None:
+        """追加该源在 scan 输入上的引用位置，并刷新根目录 module_ref_index.txt。"""
+        if not sites:
+            return
+        display = str(logical_abs(source_path))
+        subdir = self._target_dir(source_path)
+        rel = f"by_file/{subdir.name}"
+        for site in sites:
+            self._ref_index_entries.append((display, rel, site))
+        self._write_module_ref_index()
+
+    def _write_module_ref_index(self) -> None:
+        text = format_module_ref_index(self._ref_index_entries)
+        (self._root / "module_ref_index.txt").write_text(
+            text, encoding="utf-8", newline="\n"
+        )

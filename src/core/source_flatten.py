@@ -17,6 +17,7 @@ from core.filelist_paths import format_incdir_line
 from core.path_logical import logical_abs
 from verilog_text.preproc import PreprocDirectiveParser
 from verilog_text.scan import scan_verilog_body
+from verilog_text.ref_index import collect_module_ref_sites
 from verilog_text.scan_trace import build_instance_scan_trace
 from verilog_text.squeeze import (
     join_continued_lines,
@@ -197,6 +198,7 @@ def extract_dependencies_from_file(
                 "05_instance_scan_trace.txt",
                 build_instance_scan_trace(stages[4]),
             )
+            dbg.record_ref_sites(path, collect_module_ref_sites(stages[4]))
         squ = ctx.fire(SqueezeForDependencyScanAPI, source_text=flat).squeezed_text
         if dbg is not None:
             assert squ == stages[4]

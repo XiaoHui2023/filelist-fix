@@ -5,6 +5,8 @@ module torture_primitives_gates ();
 
   not   g_not   (y, a);
   buf   g_buf   (y, a);
+  buf (weak0, weak1) g_buf_ds (y, a);
+  and (supply1, supply0) g_and_ds (y, a, b);
   bufif0 g_bf0  (y, a, b);
   bufif1 g_bf1  (y, a, b);
   notif0 g_nf0  (y, a, b);
