@@ -1,29 +1,83 @@
 # filelist-fix
 
-从顶层模块收集 Verilog/SystemVerilog 依赖并生成 filelist。
+从顶层模块收集 Verilog/SystemVerilog 依赖，生成 filelist。
 
 ## 命令行参数
 
 | 长参数 | 短参数 | 类型 | 默认值 | 说明 |
 |--------|--------|------|--------|------|
-| `--source` | `-s` | 路径（可多次指定） | 必填 | 检索根目录或文件；同一 `-s` 后可跟多个路径（`-s a b`），也可多次写 `-s`（`-s a -s b`） |
-| `--exclude` | `-x` | 路径（可多次指定） |  | 在 `--source` 范围内排除该文件或整段目录树；路径须存在；同上支持 `-x a b` 与多次 `-x` |
-| `--top` | `-t` | 文本（可多次指定） | 必填 | 顶层模块名；同上支持 `-t m1 m2` 与多次 `-t` |
-| `--prelude` | `-p` | 文件路径（可多次指定） |  | prelude：`+define+` / `+incdir+` 或普通行，顺序保留；可省略；同上支持 `-p a b` 与多次 `-p` |
-| `--output` | `-o` | 文件路径 | 必填 | 写出最终 filelist（先 prelude 行，再排序后的路径） |
-| `--path-style` |  | `relative` / `absolute` | `relative` | filelist 正文中的源路径：相对 **输出文件所在目录**，或绝对路径；`+define+` / `+incdir+` 等仍只参与解析、不写入正文 |
-| `--save` |  | 文件路径 |  | SQLite 解析缓存（扩展名常用 **`.db`**）；源未变（mtime/size）时可复用；省略则不启用 |
-| `--log` | `-l` | 文件路径 |  | 写入 **DEBUG** 级别日志（检索模块、命中路径、解析到的定义/引用、入队模块等）；**每次运行整文件覆盖**（不追加）；**行首不写日期时间**；列表类字段为多行缩进块；省略时不写文件 |
-| `--debug-dump` |  | 目录路径 |  | 将每个源文件依赖解析流水线各阶段文本写入该目录下 `by_file/…`；根目录另有 **`module_ref_index.txt`**（按被引用模块名汇总引用位置，便于 **module not found** 时搜索）；**每次运行先清空 `by_file/` 再写入**，仅保留本轮产物；根目录 **README.txt** 说明片段含义；`by_file` 子目录名一般为去掉扩展名后的短文件名（非法字符换为下划线）；**仅当**本轮有多个不同源文件经上述规则会**同名**时，才在目录名末尾追加 `_` + 该源绝对路径 **SHA256 前 16 位十六进制**；与 **`-l`** 无关；解析缓存命中且未重算时不会为该源写片段 |
+| `--source` | `-s` | 多个路径 |  |  |
+| `--exclude` | `-x` | 多个路径 |  | 排除 source 内的目录 |
+| `--top` | `-t` | 多个模块名 |  |  |
+| `--prelude` | `-p` | 多个文件路径 |  | 置于 output 前的 filelist 文件 |
+| `--output` | `-o` | 文件路径 |  |  |
+| `--path-style` |  | `relative` / `absolute` | `relative` | 相对路径或绝对路径 |
+| `--save` |  | 文件路径 |  | 解析结果缓存 |
+| `--log` | `-l` | 文件路径 |  | 运行日志 |
+| `--debug-dump` |  | 目录路径 |  | 依赖分析调试输出 |
 
-## 何时可以忽略 Not found module
+## 异常情形
 
-有的模块有参数，可以通过参数开关例化，因此存在某个子模块找不到文件，但是可以通过关闭参数的方法通过编译，依然能使用，这种情况下虽然会报not found，但可以忽略
+### source 内找不到模块
 
-## API
+```text
+Warning: Not found module "<名>"
+```
 
-API 类型与说明见 [`docs/api.md`](docs/api.md)。
+找不到模块。
 
-## IMPL
+也可能该模块受参数控制启用，在某些参数配置下用不到它，也不会例化它，这种情况下可以忽略警告。
 
-模块与订阅 API 说明见 [`docs/impl.md`](docs/impl.md)。
+### 模块名冲突
+
+```text
+Error: Duplicate definition for module "…" (use --exclude):
+  …
+```
+
+同一个模块出现在多份文件里。
+
+在 exclude 里排除多余文件，只留一个。
+
+### 找不到 include
+
+```text
+Error: Not found include "…" in file "…"
+```
+
+需要在 prelude 中补充 `+incdir+`。
+
+### 自动补充 incdir 时冲突
+
+```text
+Error: Ambiguous include "…" in file "…"; multiple matches (use --exclude):
+  …
+```
+
+自动补充 `incdir` 时，多个目录里都有被 `include` 的文件。
+
+需要在 prelude 中指明 `+incdir+`，或用 exclude 排除多余文件。
+
+### prelude 路径不存在
+
+```text
+FileNotFoundError: prelude 不存在: …
+```
+
+检查 prelude 及其中 `-f`、`-v`、`-y` 引用的路径。
+
+### include 嵌套过深
+
+```text
+RecursionError: `include` nesting too deep (possible cycle or broken tree)
+```
+
+检查 `include` 是否互相引用成环。
+
+### 缺少 rg 或 fd
+
+```text
+FileNotFoundError: 未在 …/tools/bin 找到 rg（尝试过: …）。
+```
+
+缺少 `rg` 或 `fd` 依赖。

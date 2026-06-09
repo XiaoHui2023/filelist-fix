@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="PATH",
-        help="Exclude file(s) or directory tree(s) from search under --source (repeatable; multiple paths may follow one -x). Path must exist.",
+        help="Exclude file(s) or directory tree(s) from search under --source (repeatable; multiple paths may follow one -x).",
     )
     p.add_argument(
         "--top",
