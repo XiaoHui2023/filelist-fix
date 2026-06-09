@@ -1,4 +1,8 @@
 @echo off
+rem 将 ripgrep（rg）与 fd 下载到 tools\bin\，供本项目搜索使用。
+rem 用法（仓库根）：tools\download_rg_fd.bat
+rem 需 PowerShell 5+（Invoke-WebRequest）。完成后应有 tools\bin\rg.exe 与 tools\bin\fd.exe。
+rem 发布页：github.com/BurntSushi/ripgrep/releases 、 github.com/sharkdp/fd/releases
 setlocal EnableDelayedExpansion
 cd /d "%~dp0\.."
 

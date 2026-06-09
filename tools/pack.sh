@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# 统一打包：使用仓库根 .venv，先 PyInstaller（filelist_fix.spec），Linux 再 staticx 得到自解压静态包。
-# Windows 仅 PyInstaller（无 staticx）。
+# 一键打包：仓库根 .venv → PyInstaller（filelist_fix.spec）→ Linux 上 staticx 自解压单文件 → 组装发布压缩包。
+# Windows 仅 PyInstaller，产出 dist/filelist-fix.exe，无 staticx。
+# 每次 pip 对项目与打包工具 --force-reinstall，避免 .venv 残留旧依赖。
 #
-# 用法（仓库根）：bash tools/pack.sh
-# 依赖：已安装 curl/tar；Linux 另需系统包 patchelf（如 apt install patchelf）。
-# 无 .venv 时：Linux 用 python3 -m venv .venv；Windows 用 py -3 或 python 创建 .venv。
+# 用法（仓库根）：
+#   ./tools/pack.sh          Linux / macOS / Git Bash
+#   bash tools/pack.sh       同上（含 Windows Git Bash）
+# 依赖：无 tools/bin/rg、fd 时自动调用 download_rg_fd.sh 或 .bat；Linux staticx 需系统 patchelf（如 apt install patchelf）。
+# 无 .venv 时自动创建（Linux：python3 -m venv；Windows：py -3 或 python）。
+# 产物：dist/filelist-fix（Linux 经 staticx）或 dist/filelist-fix.exe；
+#       另有 dist/filelist-fix-<version>-<platform>.zip 或 .tar.gz（README.md，见 tools/bundle_release.py）。
+# 兼容：单文件 ABI 取决于构建机 glibc；旧 Linux 须在目标机实测 staticx 产物。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -86,8 +92,8 @@ if [[ ! -f "$SPEC" ]]; then
 fi
 
 "${PYTHON_CMD[@]}" -m pip install -q -U pip setuptools wheel
-"${PYTHON_CMD[@]}" -m pip install -q -e .
-"${PYTHON_CMD[@]}" -m pip install -q "pyinstaller>=6.0"
+"${PYTHON_CMD[@]}" -m pip install -q --upgrade --force-reinstall -e .
+"${PYTHON_CMD[@]}" -m pip install -q --upgrade --force-reinstall "pyinstaller>=6.0"
 
 rm -rf "$ROOT/build" "$ROOT/dist"
 
@@ -96,36 +102,38 @@ echo "==> PyInstaller: $SPEC"
 
 if [[ -f "$ROOT/dist/filelist-fix.exe" ]]; then
   echo "完成: $ROOT/dist/filelist-fix.exe（Windows：无 staticx 步骤）"
-  exit 0
-fi
-
-if [[ ! -f "$ROOT/dist/filelist-fix" ]]; then
+elif [[ ! -f "$ROOT/dist/filelist-fix" ]]; then
   echo "错误: 未在 dist 找到 filelist-fix 或 filelist-fix.exe。" >&2
   exit 1
+else
+  case "$(uname -s 2>/dev/null || true)" in
+    Linux)
+      if ! command -v patchelf >/dev/null 2>&1; then
+        echo "错误: Linux 下 staticx 需要系统命令 patchelf（例如: sudo apt install patchelf）。" >&2
+        exit 1
+      fi
+      "${PYTHON_CMD[@]}" -m pip install -q --upgrade --force-reinstall staticx
+      STATICX="$ROOT/.venv/bin/staticx"
+      if [[ ! -x "$STATICX" ]]; then
+        echo "错误: 未找到可执行的 .venv/bin/staticx。" >&2
+        exit 1
+      fi
+      PYI_OUT="$ROOT/dist/filelist-fix"
+      TMP_OUT="$ROOT/dist/.filelist-fix-staticx.tmp"
+      rm -f "$TMP_OUT"
+      echo "==> staticx: $PYI_OUT -> filelist-fix"
+      "$STATICX" "$PYI_OUT" "$TMP_OUT"
+      mv -f "$TMP_OUT" "$PYI_OUT"
+      chmod +x "$PYI_OUT"
+      echo "完成: $PYI_OUT（staticx 自解压包；请在目标机实测）"
+      ;;
+    *)
+      echo "完成: $ROOT/dist/filelist-fix（非 Linux，跳过 staticx）"
+      ;;
+  esac
 fi
 
-case "$(uname -s 2>/dev/null || true)" in
-  Linux)
-    if ! command -v patchelf >/dev/null 2>&1; then
-      echo "错误: Linux 下 staticx 需要系统命令 patchelf（例如: sudo apt install patchelf）。" >&2
-      exit 1
-    fi
-    "${PYTHON_CMD[@]}" -m pip install -q staticx
-    STATICX="$ROOT/.venv/bin/staticx"
-    if [[ ! -x "$STATICX" ]]; then
-      echo "错误: 未找到可执行的 .venv/bin/staticx。" >&2
-      exit 1
-    fi
-    PYI_OUT="$ROOT/dist/filelist-fix"
-    TMP_OUT="$ROOT/dist/.filelist-fix-staticx.tmp"
-    rm -f "$TMP_OUT"
-    echo "==> staticx: $PYI_OUT -> filelist-fix"
-    "$STATICX" "$PYI_OUT" "$TMP_OUT"
-    mv -f "$TMP_OUT" "$PYI_OUT"
-    chmod +x "$PYI_OUT"
-    echo "完成: $PYI_OUT（staticx 自解压包；请在目标机实测）"
-    ;;
-  *)
-    echo "完成: $ROOT/dist/filelist-fix（非 Linux，跳过 staticx）"
-    ;;
-esac
+echo "==> 组装发布压缩包"
+"${PYTHON_CMD[@]}" "$ROOT/tools/bundle_release.py"
+
+echo "PyInstaller 输出目录: $ROOT/dist"

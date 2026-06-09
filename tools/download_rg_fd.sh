@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# 下载 ripgrep 与 fd 到 tools/bin（按架构选发布包；Linux x86_64/aarch64 的 fd 使用 musl 包以降低对 glibc 版本的要求）。
+# 将 ripgrep（rg）与 fd 静态发行包下载到 tools/bin/，供本项目搜索使用（不写入系统 PATH）。
+#
+# 用法（仓库根）：./tools/download_rg_fd.sh
+# 完成后应有 tools/bin/rg 与 tools/bin/fd；缺失时程序启动即 FileNotFoundError。
+# Linux x86_64/aarch64 的 fd 使用 musl 包以降低对 glibc 版本的要求。
+# 官方发布页（404 时请更新下方 RG_VER、FD_VER 与资产名）：
+#   https://github.com/BurntSushi/ripgrep/releases
+#   https://github.com/sharkdp/fd/releases
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
