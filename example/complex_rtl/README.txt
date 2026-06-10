@@ -16,6 +16,6 @@ complex_rtl — 刻意复杂化的 Verilog/SystemVerilog 黄金样例
 - 块注释内请勿写 `` `ifdef`` 等预处理行：当前管线在剥离块注释前逐行解释指令，会被误读。
 
 运行：
-  在仓库根执行 example.bat（Windows）或 ./example.sh（Linux/macOS）；静态前导文件为
+  在仓库根执行 example.bat（Windows）或 ./example.sh（Linux/macOS）；prelude 文件为
   example/run_prelude.f（+define+ / +incdir+，路径相对该文件所在目录），输出写入
   example/generated/demo_filelist.f；generated/ 已加入 .gitignore。

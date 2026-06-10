@@ -4,17 +4,42 @@
 
 ## 命令行参数
 
-| 长参数 | 短参数 | 类型 | 默认值 | 说明 |
-|--------|--------|------|--------|------|
-| `--source` | `-s` | 多个路径 |  |  |
-| `--exclude` | `-x` | 多个路径 |  | 排除 source 内的目录 |
-| `--top` | `-t` | 多个模块名 |  |  |
-| `--prelude` | `-p` | 多个文件路径 |  | 置于 output 前的 filelist 文件 |
-| `--output` | `-o` | 文件路径 |  |  |
-| `--path-style` |  | `relative` / `absolute` | `relative` | 相对路径或绝对路径 |
-| `--save` |  | 文件路径 |  | 解析结果缓存 |
-| `--log` | `-l` | 文件路径 |  | 运行日志 |
-| `--debug-dump` |  | 目录路径 |  | 依赖分析调试输出 |
+| 长参数 | 短参数 | 类型 | 必填 | 默认值 | 说明 |
+|--------|--------|------|:----:|--------|------|
+| `--source` | `-s` | 多个路径 | ✓ |  |  |
+| `--exclude` | `-x` | 多个路径 |  |  | 排除 source 内的目录 |
+| `--top` | `-t` | 多个模块名 | ✓ |  |  |
+| `--prelude` | `-p` | 多个文件路径 |  |  | 置于 output 前的 filelist 文件 |
+| `--output` | `-o` | 文件路径 | ✓ |  |  |
+| `--path-style` |  | `relative` / `absolute` |  | `relative` | 相对路径或绝对路径 |
+| `--save` |  | 文件路径 |  |  | 解析结果缓存 |
+| `--log` | `-l` | 文件路径 |  |  | 运行日志 |
+| `--debug-dump` |  | 目录路径 |  |  | 依赖分析调试输出 |
+
+## 使用
+
+```makefile
+TOOL := /path/to/tool               # 可执行文件或脚本
+SOURCE += /path/to/rtl/common       # 公共 RTL 目录
+SOURCE += /path/to/rtl/chip         # 子系统 RTL 目录
+# EXCLUDE += /path/to/rtl/legacy    # 旧版目录，不参与收集
+# EXCLUDE += /path/to/rtl/vendor    # 第三方 IP，与自研 RTL 分开
+TOP += chip_top                     # 仿真顶层模块
+TOP += chip_wrapper                 # 另一套顶层的模块名
+# PRELUDE += /path/to/defines.f     # +define+ 与编译开关
+# PRELUDE += /path/to/incdirs.f     # +incdir+ 写在 output 前的行
+OUTPUT     := /path/to/out/chip.f   # 写出给仿真/综合的 filelist
+# PATH_STYLE := absolute            # filelist 内写绝对路径
+# SAVE       := /path/to/out/parse.db # 重复跑时复用解析结果
+# LOG        := /path/to/out/run.log  # 排障日志
+# DEBUG_DUMP := /path/to/out/debug    # 依赖分析中间片段
+
+.PHONY: filelist
+filelist:
+	$(TOOL) -s $(SOURCE) -t $(TOP) -o $(OUTPUT)
+#	-x $(EXCLUDE) -p $(PRELUDE) --path-style $(PATH_STYLE) \
+#	--save $(SAVE) -l $(LOG) --debug-dump $(DEBUG_DUMP)
+```
 
 ## 异常情形
 

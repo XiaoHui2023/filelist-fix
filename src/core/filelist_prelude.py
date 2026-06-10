@@ -118,7 +118,7 @@ def _resolve_incdir(prelude_file: Path, inc: str) -> Path:
 
 @dataclass
 class PreludeOutcome:
-    """filelist 前导：写入输出的行（已展开、无嵌套 ``-f``）、解析用目录与宏。"""
+    """prelude 解析结果：写入 filelist 开头的行（已展开、无嵌套 ``-f``）、目录与宏。"""
 
     head_lines: list[str] = field(default_factory=list)
     incdirs: list[Path] = field(default_factory=list)
