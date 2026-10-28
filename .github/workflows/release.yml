@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rolling-release
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.9'
+      - name: Build and verify frozen Windows assets
+        shell: cmd
+        run: call tools\ci_pack_windows.bat
+      - name: Source regressions
+        run: |
+          python -m pip install pytest==8.3.5
+          python -m pytest -q
+      - name: Asset identities
+        id: assets
+        shell: python
+        run: |
+          import os, sys
+          sys.path.insert(0, 'tools')
+          from release_support import binary_name, archive_name, version, target
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write(f'binary={binary_name()}\narchive={archive_name()}\nreport=filelist-fix-{version()}-{target()}.json\n')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            dist/${{ steps.assets.outputs.binary }}
+            dist/${{ steps.assets.outputs.archive }}
+            dist/${{ steps.assets.outputs.report }}
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build in Ubuntu 16.04
+        run: docker run --rm -v "$GITHUB_WORKSPACE:/work" -w /work ubuntu:16.04 bash tools/ci_pack_ubuntu16.sh
+      - name: Restore runner ownership
+        run: sudo chown -R "$(id -u):$(id -g)" build dist
+      - name: Native host consumption
+        run: python3 tools/verify_release.py dist --run
+      - name: Asset identities
+        id: assets
+        shell: python
+        run: |
+          import os, sys
+          sys.path.insert(0, 'tools')
+          from release_support import binary_name, archive_name, version, target
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write(f'binary={binary_name()}\narchive={archive_name()}\nreport=filelist-fix-{version()}-{target()}.json\n')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: |
+            dist/${{ steps.assets.outputs.binary }}
+            dist/${{ steps.assets.outputs.archive }}
+            dist/${{ steps.assets.outputs.report }}
+          if-no-files-found: error
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Publish validated exact asset set
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/publish_release.py release-assets
+      - name: Download and execute Linux Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/check_remote_release.py --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
+
+  windows-download:
+    needs: publish
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.9'
+      - name: Download and execute Windows Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/check_remote_release.py --repo "$env:GITHUB_REPOSITORY" --sha "$env:GITHUB_SHA"

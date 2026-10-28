@@ -1,0 +1,22 @@
+[
+  "hier/dual_mods.sv",
+  "hier/leaf_alu.v",
+  "hier/leaf_mem.v",
+  "hier/mid_math.v",
+  "hier/mid_memctl.v",
+  "top_chip.v",
+  "torture/nested/nested_pyramid.sv",
+  "torture/nested/ni_leaf.v",
+  "torture/torture_anon.v",
+  "torture/torture_bind.sv",
+  "torture/torture_comment_farm.v",
+  "torture/torture_dep_a.v",
+  "torture/torture_dep_b.v",
+  "torture/torture_gen.sv",
+  "torture/torture_hash_params.v",
+  "torture/torture_ifdef_zoo.v",
+  "torture/torture_param_leaf.v",
+  "torture/torture_primitives_gates.v",
+  "torture/torture_timing.v",
+  "torture/torture_udp_demo.v"
+]

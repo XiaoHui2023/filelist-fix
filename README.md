@@ -106,3 +106,7 @@ FileNotFoundError: 未在 …/tools/bin 找到 rg（尝试过: …）。
 ```
 
 缺少 `rg` 或 `fd` 依赖。
+
+## 发布
+
+运行 `tools\pack.bat` 或 `./tools/pack.sh`，在 `dist/` 生成含版本与平台的可执行文件和压缩包。压缩包附带必需的依赖许可文本。

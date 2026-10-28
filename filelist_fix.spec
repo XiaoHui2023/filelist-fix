@@ -35,11 +35,17 @@ repo_root = _repo_root_from_spec()
 src_main = repo_root / "src" / "__main__.py"
 
 sys.path.insert(0, str(repo_root / "src"))
+sys.path.insert(0, str(repo_root / "tools"))
+from release_support import binary_name
 
 tools_bin = repo_root / "tools" / "bin"
 datas: list[tuple[str, str]] = []
 if tools_bin.is_dir():
     datas.append((str(tools_bin), "tools/bin"))
+notices = repo_root / "build" / "release-notices"
+if not notices.is_dir():
+    raise RuntimeError("Run tools/pack.bat or tools/pack.sh to collect required notices first")
+datas.append((str(notices), "licenses"))
 
 hiddenimports = sorted(
     set(collect_submodules("impl") + collect_submodules("api")),
@@ -70,7 +76,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="filelist-fix",
+    name=binary_name().removesuffix(".exe"),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
