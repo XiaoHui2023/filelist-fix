@@ -306,3 +306,24 @@ def test_prelude_junction_alias_is_deduplicated(tmp_path: Path):
     lines = (tmp_path / "out.f").read_text().splitlines()
     assert len([line for line in lines if (tmp_path / line).resolve() == leaf.resolve()]) == 1
     assert "alias/leaf.sv" == lines[0]
+
+
+def test_warm_cache_reemits_discovered_incdir(tmp_path: Path):
+    rtl, headers = tmp_path / "rtl", tmp_path / "headers"
+    rtl.mkdir()
+    headers.mkdir()
+    write(rtl, "top.sv", '`include "auto.svh"\nmodule top;\nendmodule\n')
+    write(headers, "auto.svh", "// discovered header\n")
+    for _ in range(2):
+        rb, ctx = build(tmp_path, save=True)
+        assert rb is not None and not ctx.exit_code
+        lines = (tmp_path / "out.f").read_text().splitlines()
+        assert "+incdir+headers" in lines
+    ctx = AppContext(logger=None, console=None)
+    app = FilelistApplication(search_roots=[tmp_path], top_modules=["top"], prelude_paths=[],
+                             output_path=tmp_path / "absolute.f", save_path=tmp_path / "cache.db",
+                             path_style="absolute", ctx=ctx)
+    assert app.run() is not None
+    inc_lines = [line for line in (tmp_path / "absolute.f").read_text().splitlines()
+                 if line.startswith("+incdir+")]
+    assert len(inc_lines) == 1 and Path(inc_lines[0].removeprefix("+incdir+")).is_absolute()

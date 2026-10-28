@@ -24,7 +24,7 @@ from core.archive_sqlite import FileParseArchive
 from core.bin_resolve import ToolBinaryLocator, normalize_search_roots
 from core.dep_order import prerequisite_edges, topo_prereq_first, schedule_prelude_dependencies
 from core.fd_search import FdModuleSearch
-from core.filelist_paths import format_listed_path
+from core.filelist_paths import format_incdir_line, format_listed_path
 from core.filelist_prelude import PreludeOutcome, load_prelude_files_with_signature
 from core.path_logical import logical_abs
 from core.rg_search import RgModuleSearch
@@ -248,6 +248,18 @@ class FilelistApplication:
         text = "\n".join(lines) + "\n"
         ctx.fire(OnFilelistWriteAPI, output_path=self._output, text=text)
 
+    def _restore_discovered_incdirs(
+        self, st: FilelistSessionState, host: Path, directories: list[Path],
+    ) -> None:
+        """Replay directory state and format it for this run's output location."""
+        for directory in directories:
+            if directory not in st.incdirs:
+                st.incdirs.append(directory)
+            line = format_incdir_line(directory, self._output, absolute=self._path_absolute)
+            lines = st.incdir_lines_before.setdefault(host, [])
+            if line not in lines:
+                lines.append(line)
+
     def run(self) -> ResolvedBuild | None:
         """收集依赖闭包、排序并发事件；写出 filelist 与解析复用释放由 impl 消费。"""
         ctx = self._ctx
@@ -281,11 +293,15 @@ class FilelistApplication:
                 st.incdirs.append(entry.path)
             else:
                 hit = st.canonical_source_path(entry.path)
+                before_incdirs = list(st.incdirs)
                 defs, refs, _ = extract_dependencies_from_file(
                     hit, st.incdirs, st.defines, ctx=ctx, output_defines=st.defines,
                 )
                 if getattr(ctx, "exit_code", None):
                     return None
+                self._restore_discovered_incdirs(
+                    st, hit, [p for p in st.incdirs if p not in before_incdirs],
+                )
                 if not self._register_defined_modules(ctx, st, hit, defs):
                     return None
                 st.file_refs[hit] = list(refs)
@@ -396,16 +412,23 @@ class FilelistApplication:
                     defs = json.loads(cached.defined_modules)
                     refs = json.loads(cached.referenced_modules)
                     incs = json.loads(cached.raw_includes)
+                    self._restore_discovered_incdirs(
+                        st, hit, [Path(p) for p in json.loads(cached.discovered_incdirs_json)],
+                    )
                 else:
                     if log is not None and log.isEnabledFor(logging.DEBUG):
                         log.debug("extract dependencies from %s", hit)
                     dependencies: list[Path] = []
+                    before_incdirs = list(st.incdirs)
                     defs, refs, incs = extract_dependencies_from_file(
                         hit, st.incdirs, st.defines, ctx=ctx, dependency_files=dependencies,
                     )
                     if getattr(ctx, "exit_code", None):
                         break
-                    self._save.put(hit, defs, refs, incs, dependency_files=dependencies)
+                    discovered = [p for p in st.incdirs if p not in before_incdirs]
+                    self._restore_discovered_incdirs(st, hit, discovered)
+                    self._save.put(hit, defs, refs, incs, dependency_files=dependencies,
+                                   discovered_incdirs=discovered)
 
                 if getattr(ctx, "exit_code", None):
                     break

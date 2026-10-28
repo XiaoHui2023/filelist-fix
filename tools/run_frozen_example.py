@@ -33,7 +33,8 @@ def verify(executable: Path) -> dict:
         shutil.copyfile(ROOT / "example/run_prelude.f", example / "run_prelude.f")
         output = work / "example.f"
         run(["-s", str(example / "complex_rtl"), "-t", "top_chip", "-p", str(example / "run_prelude.f"),
-             "-o", str(output), "--path-style", "absolute", "--debug-dump", str(work / "debug")])
+             "-o", str(output), "--path-style", "absolute", "--debug-dump", str(work / "debug"),
+             "--log", str(work / "run.log")])
         files = [Path(line) for line in output.read_text(encoding="utf-8").splitlines()
                  if line and not line.startswith(("+", "-"))]
         actual = sorted(p.resolve().relative_to((example / "complex_rtl").resolve()).as_posix() for p in files)
@@ -41,6 +42,7 @@ def verify(executable: Path) -> dict:
         assert actual == expected_files and len(set(files)) == len(files)
         assert files[-1].name == "top_chip.v" and all(p.is_file() for p in files)
         assert (work / "debug/module_ref_index.txt").is_file()
+        assert (work / "run.log").stat().st_size > 0
         checked.append("full_complex_example_exact_20_files_and_debug")
 
         rtl = work / "unicode-源码"
@@ -90,6 +92,27 @@ def verify(executable: Path) -> dict:
         cp = run(args, 1)
         assert "Not found include" in cp.stderr
         checked.append("missing_prelude_include_is_error")
+        auto = work / "automatic"
+        (auto / "rtl").mkdir(parents=True)
+        (auto / "headers").mkdir()
+        (auto / "rtl/auto_top.sv").write_text('`include "auto.svh"\nmodule auto_top;\nendmodule\n', encoding="utf-8")
+        (auto / "headers/auto.svh").write_text("// auto include\n", encoding="utf-8")
+        auto_output = work / "auto.f"
+        auto_args = ["-s", str(auto), "-t", "auto_top", "-o", str(auto_output), "--save", str(work / "auto.db")]
+        for mode in [[], [], ["--path-style", "absolute"]]:
+            run(auto_args + mode)
+            incs = [line.removeprefix("+incdir+").strip('"') for line in auto_output.read_text(encoding="utf-8").splitlines()
+                    if line.startswith("+incdir+")]
+            assert len(incs) == 1 and (work / incs[0] / "auto.svh").is_file()
+        checked.append("auto_incdir_cold_warm_and_new_output_style")
+        shadow = auto / "shadow"
+        shadow.mkdir()
+        (shadow / "auto_top.sv").write_text("module auto_top; endmodule\n", encoding="utf-8")
+        duplicate_args = ["-s", str(auto), "-t", "auto_top", "-o", str(auto_output)]
+        run(duplicate_args, 1)
+        run(duplicate_args + ["--exclude", str(shadow)])
+        assert "shadow" not in auto_output.read_text(encoding="utf-8")
+        checked.append("duplicate_definition_and_exclusion")
     return {"executable": executable.name, "sha256": sha(executable), "features": checked,
             "seconds": round(time.monotonic() - started, 3), "independent_cwd": True,
             "empty_path": True, "source_imports_disabled": True}
