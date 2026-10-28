@@ -44,3 +44,6 @@ Thumbs.db
 Desktop.ini
 *.swp
 *~
+
+# Machine-specific managed validation entrypoint
+.codex/quality-gate.json
