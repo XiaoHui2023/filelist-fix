@@ -31,17 +31,53 @@ def topo_prereq_first(prereq: dict[Path, set[Path]], seeds: Iterable[Path]) -> l
     """对给定子图做深度后序：依赖文件先于引用者出现；输入为全部参与排序的节点。"""
     nodes = list({logical_abs(p) for p in seeds})
     seen: set[Path] = set()
+    visiting: set[Path] = set()
     out: list[Path] = []
 
     def dfs(n: Path) -> None:
         r = logical_abs(n)
         if r in seen:
             return
-        seen.add(r)
+        if r in visiting:
+            raise ValueError(f"Cyclic source dependency at {r}")
+        visiting.add(r)
         for d in sorted(prereq.get(r, ()), key=lambda p: str(p)):
             dfs(d)
+        visiting.remove(r)
+        seen.add(r)
         out.append(r)
 
     for s in sorted(nodes, key=lambda p: str(p)):
         dfs(s)
     return out
+
+
+def schedule_prelude_dependencies(
+    prereq: dict[Path, set[Path]], ordered: list[Path], sources: dict[int, Path],
+) -> tuple[dict[int, list[Path]], list[Path]]:
+    """Insert discovered prerequisites before fixed prelude sources without moving directives."""
+    pinned = set(sources.values())
+    emitted: set[Path] = set()
+    visiting: set[Path] = set()
+    before: dict[int, list[Path]] = {}
+
+    def visit(path: Path, bucket: list[Path], current: Path) -> None:
+        if path in emitted:
+            return
+        if path in visiting:
+            raise ValueError(f"Cyclic source dependency at {path}")
+        if path in pinned and path != current:
+            raise ValueError(f"Prelude source {current} requires later prelude source {path}")
+        visiting.add(path)
+        for dependency in sorted(prereq.get(path, ()), key=str):
+            visit(dependency, bucket, current)
+        visiting.remove(path)
+        emitted.add(path)
+        if path != current:
+            bucket.append(path)
+
+    for index, path in sources.items():
+        bucket: list[Path] = []
+        visit(path, bucket, path)
+        before[index] = bucket
+    return before, [p for p in ordered if p not in emitted]

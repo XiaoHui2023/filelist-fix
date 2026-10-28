@@ -4,6 +4,7 @@ import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from core.bin_resolve import path_stat_sig
 from core.filelist_paths import format_incdir_line, format_listed_path
@@ -117,12 +118,30 @@ def _resolve_incdir(prelude_file: Path, inc: str) -> Path:
 
 
 @dataclass
+class PreludeEntry:
+    kind: Literal["source", "define", "incdir"]
+    line_index: int
+    path: Path | None = None
+    name: str = ""
+    value: str = ""
+
+
+@dataclass
 class PreludeOutcome:
     """prelude 解析结果：写入 filelist 开头的行（已展开、无嵌套 ``-f``）、目录与宏。"""
 
     head_lines: list[str] = field(default_factory=list)
     incdirs: list[Path] = field(default_factory=list)
     defines: dict[str, str] = field(default_factory=dict)
+    entries: list[PreludeEntry] = field(default_factory=list)
+
+    def add_source(self, path: Path, output_path: Path, absolute: bool) -> None:
+        """Record each source once, retaining its first logical path and position."""
+        if any(e.kind == "source" and e.path.resolve() == path.resolve()
+               for e in self.entries):
+            return
+        self.entries.append(PreludeEntry("source", len(self.head_lines), path=path))
+        self.head_lines.append(format_listed_path(path, output_path, absolute=absolute))
 
 
 def _consume_one_filelist(
@@ -182,9 +201,7 @@ def _consume_one_filelist(
                 src = _resolve_path_token(host_parent, tok)
                 if not src.is_file():
                     raise FileNotFoundError(f"-v 源文件不存在: {src}（自 {path_log}）")
-                outcome.head_lines.append(
-                    format_listed_path(src, output_path, absolute=path_absolute)
-                )
+                outcome.add_source(src, output_path, path_absolute)
             continue
 
         ym = _Y_LINE.match(s)
@@ -204,6 +221,7 @@ def _consume_one_filelist(
             if inc:
                 resolved = _resolve_incdir(path_log, inc)
                 outcome.incdirs.append(resolved)
+                outcome.entries.append(PreludeEntry("incdir", len(outcome.head_lines), path=resolved))
                 outcome.head_lines.append(
                     format_incdir_line(resolved, output_path, absolute=path_absolute)
                 )
@@ -213,6 +231,7 @@ def _consume_one_filelist(
         if dm:
             k, v = dm.group(1), (dm.group(2) or "").strip()
             outcome.defines[k] = v
+            outcome.entries.append(PreludeEntry("define", len(outcome.head_lines), name=k, value=v))
             outcome.head_lines.append(_format_define_line(k, v))
             continue
 
@@ -223,11 +242,11 @@ def _consume_one_filelist(
         token = s.rstrip(";").strip()
         if not token:
             continue
+        if token.startswith(('"', "'")):
+            token = _parse_first_path_token(token)
         cand = _resolve_path_token(host_parent, token)
         if cand.is_file() and _is_hdl_source_file(cand):
-            outcome.head_lines.append(
-                format_listed_path(cand, output_path, absolute=path_absolute)
-            )
+            outcome.add_source(cand, output_path, path_absolute)
             continue
 
         if cand.exists():
@@ -235,6 +254,9 @@ def _consume_one_filelist(
                 format_listed_path(cand, output_path, absolute=path_absolute)
             )
             continue
+
+        if _is_hdl_source_file(cand):
+            raise FileNotFoundError(f"prelude 源文件不存在: {cand}（自 {path_log}）")
 
         outcome.head_lines.append(s)
 
@@ -265,7 +287,7 @@ def load_prelude_files_with_signature(
         if _is_hdl_source_file(p):
             if not p.is_file():
                 raise FileNotFoundError(f"prelude 源不是普通文件: {p}")
-            out.head_lines.append(format_listed_path(p, output_path, absolute=path_absolute))
+            out.add_source(p, output_path, path_absolute)
             _record_sig(p, sig_files, sig_seen)
             continue
 

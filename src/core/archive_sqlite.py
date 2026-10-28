@@ -23,9 +23,10 @@ class CachedFileRecord:
     raw_includes: str
     defines_sig: str
     incdirs_json: str
+    dependency_sigs_json: str = "[]"
 
 
-_ARCHIVE_SCHEMA_VERSION = "2"
+_ARCHIVE_SCHEMA_VERSION = "4"
 
 
 class FileParseArchive:
@@ -97,6 +98,10 @@ class FileParseArchive:
             self._conn.execute(
                 "ALTER TABLE file_cache ADD COLUMN incdirs_json TEXT NOT NULL DEFAULT '[]'"
             )
+        if "dependency_sigs_json" not in cols:
+            self._conn.execute(
+                "ALTER TABLE file_cache ADD COLUMN dependency_sigs_json TEXT NOT NULL DEFAULT '[]'"
+            )
         self._conn.commit()
 
     def _ensure_archive_schema_meta(self) -> None:
@@ -120,6 +125,8 @@ class FileParseArchive:
             self._conn.commit()
             return
         if row[0] != _ARCHIVE_SCHEMA_VERSION:
+            self._conn.execute("DELETE FROM file_cache")
+            self._conn.execute("DELETE FROM module_path")
             self._conn.execute(
                 "UPDATE archive_meta SET value = ? WHERE key = ?",
                 (_ARCHIVE_SCHEMA_VERSION, "archive_schema"),
@@ -141,6 +148,7 @@ class FileParseArchive:
             raw_includes=str(row[5]),
             defines_sig=str(row[6]) if len(row) > 6 else "",
             incdirs_json=str(row[7]) if len(row) > 7 else "[]",
+            dependency_sigs_json=str(row[8]) if len(row) > 8 else "[]",
         )
 
     def get_valid(self, path: Path) -> CachedFileRecord | None:
@@ -154,6 +162,12 @@ class FileParseArchive:
         if row[1] != mtime_ns or row[2] != size:
             return None
         rec = self._row_to_record(row)
+        try:
+            for dependency, mt, sz in json.loads(rec.dependency_sigs_json):
+                if path_stat_sig(Path(dependency)) != (mt, sz):
+                    return None
+        except (OSError, ValueError, TypeError):
+            return None
         if not parse_context_compatible(
             rec.defines_sig,
             rec.incdirs_json,
@@ -229,6 +243,8 @@ class FileParseArchive:
         defined: list[str],
         referenced: list[str],
         includes: list[str],
+        *,
+        dependency_files: list[Path] | None = None,
     ) -> None:
         if self._conn is None:
             return
@@ -236,14 +252,18 @@ class FileParseArchive:
         key = str(path.resolve())
         d_sig = defines_signature(self._defines)
         inc_json = incdirs_json(self._incdirs)
+        dependency_sigs = json.dumps([
+            [str(dependency), *path_stat_sig(dependency)]
+            for dependency in sorted({p.resolve() for p in dependency_files or []}, key=str)
+        ])
 
         self._conn.execute(
             """
             INSERT INTO file_cache(
                 path,mtime_ns,size,defined_modules,referenced_modules,raw_includes,
-                defines_sig,incdirs_json
+                defines_sig,incdirs_json,dependency_sigs_json
             )
-            VALUES(?,?,?,?,?,?,?,?)
+            VALUES(?,?,?,?,?,?,?,?,?)
             ON CONFLICT(path) DO UPDATE SET
               mtime_ns=excluded.mtime_ns,
               size=excluded.size,
@@ -251,7 +271,8 @@ class FileParseArchive:
               referenced_modules=excluded.referenced_modules,
               raw_includes=excluded.raw_includes,
               defines_sig=excluded.defines_sig,
-              incdirs_json=excluded.incdirs_json
+              incdirs_json=excluded.incdirs_json,
+              dependency_sigs_json=excluded.dependency_sigs_json
             """,
             (
                 key,
@@ -262,6 +283,7 @@ class FileParseArchive:
                 json.dumps(includes),
                 d_sig,
                 inc_json,
+                dependency_sigs,
             ),
         )
         self._conn.commit()

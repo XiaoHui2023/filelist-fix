@@ -1,20 +1,39 @@
 from __future__ import annotations
 
 import logging
+from rich.text import Text
 
 from api.events.filelist_build import (
+    OnBuildOrderInvalidAPI,
     OnModuleIndexInconsistentAPI,
     OnModuleResolveMissAPI,
 )
 
 
+@OnBuildOrderInvalidAPI.register
+def sink_build_order_invalid(cb: OnBuildOrderInvalidAPI) -> None:
+    log = getattr(cb.ctx, "logger", None)
+    if log is not None:
+        log.error("%s", cb.message)
+    console = getattr(cb.ctx, "console", None)
+    if console is not None:
+        line = Text("Error", style="red")
+        line.append(f": {cb.message}")
+        console.print(line)
+    cb.ctx.request_exit(1)
+
+
 @OnModuleResolveMissAPI.register
 def sink_module_resolve_miss(cb: OnModuleResolveMissAPI) -> None:
-    """Emit a WARNING when a logger is present so ``-l`` files see misses next to DEBUG context."""
+    """Report each unresolved definition before the closure is rejected."""
     log = getattr(cb.ctx, "logger", None)
-    if log is None:
-        return
-    log.warning('Not found module "%s"', cb.module_name)
+    if log is not None:
+        log.error('Not found module "%s"', cb.module_name)
+    console = getattr(cb.ctx, "console", None)
+    if console is not None:
+        line = Text("Error", style="red")
+        line.append(f': Not found module "{cb.module_name}"')
+        console.print(line)
 
 
 @OnModuleIndexInconsistentAPI.register

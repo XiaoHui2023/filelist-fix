@@ -4,6 +4,13 @@ import re
 from dataclasses import dataclass
 
 
+def mask_preprocessor_comments(text: str) -> str:
+    """Blank comments while retaining quoted include paths and line boundaries."""
+    tokens = re.compile(r'"(?:\\.|[^"\\])*"|/\*.*?\*/|//[^\n]*', re.DOTALL)
+    return tokens.sub(lambda m: m.group() if m.group().startswith('"') else
+                      re.sub(r"[^\r\n]", " ", m.group()), text)
+
+
 @dataclass
 class IfdefFrame:
     parent_active: bool
@@ -27,7 +34,7 @@ class PreprocDirectiveParser:
     def handle_directive_line(self, line: str) -> bool:
         """若是预处理指令则处理并返回 True；否则返回 False 由上层按源码处理。"""
         m = re.match(
-            r"^\s*`(ifdef|ifndef|elsif|else|endif|define|undef)\b\s*(.*)$",
+            r"^\s*`(ifdef|ifndef|elsif|else|endif|define|undef|undefineall)\b\s*(.*)$",
             line,
             re.IGNORECASE,
         )
@@ -82,7 +89,7 @@ class PreprocDirectiveParser:
         if cmd == "define":
             if not self._active_full():
                 return True
-            dm = re.match(r"^([A-Za-z_]\w*)(?:\s+(.*))?$", rest)
+            dm = re.match(r"^([A-Za-z_]\w*)(?:\([^)]*\))?(?:\s+(.*))?$", rest)
             if dm:
                 key, val = dm.group(1), dm.group(2) or ""
                 self.defines[key] = val.strip()
@@ -93,6 +100,10 @@ class PreprocDirectiveParser:
             um = re.match(r"^([A-Za-z_]\w*)\s*$", rest)
             if um and um.group(1) in self.defines:
                 del self.defines[um.group(1)]
+            return True
+        if cmd == "undefineall":
+            if self._active_full():
+                self.defines.clear()
             return True
         return True
 

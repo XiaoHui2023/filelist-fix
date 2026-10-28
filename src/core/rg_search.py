@@ -17,7 +17,7 @@ class RgModuleSearch:
 
     def _pattern(self, module_name: str) -> str:
         esc = re.escape(module_name)
-        return rf"(?:module|primitive|package)\s+{esc}\b"
+        return rf"\b(?:module|macromodule|primitive|package)\s+(?:(?:automatic|static)\s+)?{esc}\b"
 
     def search_all(
         self,

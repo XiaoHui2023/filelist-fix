@@ -12,6 +12,13 @@ class JoinContinuedLinesAPI(BaseAPI):
     joined_text: str = Field(default="", description="Output after joining \\ continuations")
 
 
+class MaskPreprocessorCommentsAPI(BaseAPI):
+    """Mask comments before directive evaluation, preserving include strings."""
+
+    source_text: str = Field(description="Joined source without protected regions")
+    masked_text: str = Field(default="", description="Comment-free source for preprocessing")
+
+
 class StripVerilogCommentsAPI(BaseAPI):
     """Remove // and /* */ while preserving string literals, for dependency scanning."""
 

@@ -46,12 +46,12 @@ filelist:
 ### source 内找不到模块
 
 ```text
-Warning: Not found module "<名>"
+Error: Not found module "<名>"
 ```
 
-找不到模块。
+当前宏配置下找不到有效的模块或 package 定义，无法生成完整 filelist。
 
-也可能该模块受参数控制启用，在某些参数配置下用不到它，也不会例化它，这种情况下可以忽略警告。
+在 source 中补充定义文件，或通过 prelude 调整条件编译宏。
 
 ### 模块名冲突
 

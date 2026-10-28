@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from api.events.filelist_build import (
     OnBuildTopologyReadyAPI,
+    OnBuildOrderInvalidAPI,
     OnClosureEmptyAPI,
     OnFilelistWriteAPI,
     OnModuleIndexInconsistentAPI,
@@ -21,7 +22,7 @@ from api.events.filelist_build import (
 from api.events.progress import OnProgressAPI
 from core.archive_sqlite import FileParseArchive
 from core.bin_resolve import ToolBinaryLocator, normalize_search_roots
-from core.dep_order import prerequisite_edges, topo_prereq_first
+from core.dep_order import prerequisite_edges, topo_prereq_first, schedule_prelude_dependencies
 from core.fd_search import FdModuleSearch
 from core.filelist_paths import format_listed_path
 from core.filelist_prelude import PreludeOutcome, load_prelude_files_with_signature
@@ -96,6 +97,8 @@ class ResolvedBuild:
     head_lines: list[str]
     ordered_paths: list[Path]
     state: FilelistSessionState
+    prelude_sources: dict[int, Path] = field(default_factory=dict)
+    prelude_dependencies: dict[int, list[Path]] = field(default_factory=dict)
 
 
 class ModuleResolveTools:
@@ -204,11 +207,9 @@ class FilelistApplication:
         st: FilelistSessionState,
         hit: Path,
         defs: list[str],
-        *,
-        also_map: list[str] | None = None,
     ) -> bool:
         """将定义名写入 module_to_file；若同名已映射到其它文件则发重复错误并返回 False。"""
-        names = list(dict.fromkeys([*(also_map or []), *defs]))
+        names = list(dict.fromkeys(defs))
         for name in names:
             prev = st.module_to_file.get(name)
             if prev is not None and prev.resolve() != hit.resolve():
@@ -230,24 +231,22 @@ class FilelistApplication:
             total=1,
             message=f"write · {self._output.name}",
         )
-        lines = [h.rstrip("\n") for h in rb.head_lines]
+        lines: list[str] = []
+        def append_source(path: Path) -> None:
+            lines.extend(rb.state.incdir_lines_before.get(path, ()))
+            lines.append(format_listed_path(path, self._output, absolute=self._path_absolute))
+
+        for index, h in enumerate(rb.head_lines):
+            for dependency in rb.prelude_dependencies.get(index, ()):
+                append_source(dependency)
+            source = rb.prelude_sources.get(index)
+            if source is not None:
+                lines.extend(rb.state.incdir_lines_before.get(source, ()))
+            lines.append(h.rstrip("\n"))
         for p in rb.ordered_paths:
-            for inc_line in rb.state.incdir_lines_before.get(p, ()):
-                lines.append(inc_line.rstrip("\n"))
-            lines.append(
-                format_listed_path(p, self._output, absolute=self._path_absolute)
-            )
+            append_source(p)
         text = "\n".join(lines) + "\n"
         ctx.fire(OnFilelistWriteAPI, output_path=self._output, text=text)
-
-    def _ingest_cache(self, hit: Path) -> tuple[list[str], list[str], list[str]]:
-        c = self._save.get_valid(hit)
-        if not c:
-            return [], [], []
-        defs = json.loads(c.defined_modules)
-        refs = json.loads(c.referenced_modules)
-        incs = json.loads(c.raw_includes)
-        return defs, refs, incs
 
     def run(self) -> ResolvedBuild | None:
         """收集依赖闭包、排序并发事件；写出 filelist 与解析复用释放由 impl 消费。"""
@@ -267,14 +266,34 @@ class FilelistApplication:
         else:
             pre = PreludeOutcome()
         st = FilelistSessionState()
-        st.defines.update(pre.defines)
-        st.incdirs.extend(pre.incdirs)
         ctx.search_roots = self._search_roots
         ctx.exclude_paths = self._exclude_paths
         ctx.session_state = st
         ctx.output_path = self._output
         ctx.path_absolute = self._path_absolute
         ctx.module_resolve_tools = self._tools
+        prelude_sources: dict[int, Path] = {}
+        prelude_refs: list[str] = []
+        for entry in pre.entries:
+            if entry.kind == "define":
+                st.defines[entry.name] = entry.value
+            elif entry.kind == "incdir":
+                st.incdirs.append(entry.path)
+            else:
+                hit = st.canonical_source_path(entry.path)
+                defs, refs, _ = extract_dependencies_from_file(
+                    hit, st.incdirs, st.defines, ctx=ctx, output_defines=st.defines,
+                )
+                if getattr(ctx, "exit_code", None):
+                    return None
+                if not self._register_defined_modules(ctx, st, hit, defs):
+                    return None
+                st.file_refs[hit] = list(refs)
+                st.note_inode_parsed(hit)
+                prelude_sources[entry.line_index] = hit
+                prelude_refs.extend(refs)
+                ctx.fire(OnSourceParsedAPI, path=hit, cache_hit=False,
+                         defined_count=len(defs), referenced_count=len(refs))
         self._save = FileParseArchive(
             self._save_path,
             defines=st.defines,
@@ -284,8 +303,8 @@ class FilelistApplication:
         ctx.fire(
             OnPreludeLoadedAPI,
             prelude_path_count=len(self._prelude_paths),
-            define_count=len(pre.defines),
-            incdir_count=len(pre.incdirs),
+            define_count=len(st.defines),
+            incdir_count=len(st.incdirs),
         )
         log = getattr(ctx, "logger", None)
         if log is not None and log.isEnabledFor(logging.DEBUG):
@@ -296,7 +315,7 @@ class FilelistApplication:
                 lines_block("incdirs", [str(p) for p in st.incdirs]),
             )
 
-        q: deque[str] = deque(self._tops)
+        q: deque[str] = deque([*self._tops, *prelude_refs])
         closure_done = 0
 
         _fire_closure_progress(
@@ -360,25 +379,8 @@ class FilelistApplication:
                     log.debug("module %r -> %s", mod, hit)
 
                 if st.inode_was_parsed(hit):
-                    defs, _, _ = self._ingest_cache(hit)
-                    if not defs:
-                        defs, _, _ = extract_dependencies_from_file(
-                            hit, st.incdirs, st.defines, ctx=ctx
-                        )
-                        if getattr(ctx, "exit_code", None):
-                            break
-                    if log is not None and log.isEnabledFor(logging.DEBUG):
-                        log.debug(
-                            "reuse parsed file %s for module %r\n%s",
-                            hit,
-                            mod,
-                            lines_block("defined", defs),
-                        )
-                    if not self._register_defined_modules(
-                        ctx, st, hit, defs, also_map=[mod]
-                    ):
-                        break
-                    self._save.upsert_module_hints(hit, defs, [mod])
+                    st.note_unresolved(mod)
+                    ctx.fire(OnModuleResolveMissAPI, module_name=mod)
                     continue
 
                 _fire_closure_progress(
@@ -397,12 +399,13 @@ class FilelistApplication:
                 else:
                     if log is not None and log.isEnabledFor(logging.DEBUG):
                         log.debug("extract dependencies from %s", hit)
+                    dependencies: list[Path] = []
                     defs, refs, incs = extract_dependencies_from_file(
-                        hit, st.incdirs, st.defines, ctx=ctx
+                        hit, st.incdirs, st.defines, ctx=ctx, dependency_files=dependencies,
                     )
                     if getattr(ctx, "exit_code", None):
                         break
-                    self._save.put(hit, defs, refs, incs)
+                    self._save.put(hit, defs, refs, incs, dependency_files=dependencies)
 
                 if getattr(ctx, "exit_code", None):
                     break
@@ -425,12 +428,15 @@ class FilelistApplication:
                     referenced_count=len(refs),
                 )
 
-                self._save.upsert_module_hints(hit, defs, [mod])
+                self._save.upsert_module_hints(hit, defs, [])
 
-                if not self._register_defined_modules(ctx, st, hit, defs, also_map=[mod]):
+                if not self._register_defined_modules(ctx, st, hit, defs):
                     break
                 st.file_refs[hit] = list(refs)
                 st.note_inode_parsed(hit)
+                if mod not in defs:
+                    st.note_unresolved(mod)
+                    ctx.fire(OnModuleResolveMissAPI, module_name=mod)
                 for r in refs:
                     if r not in st.module_to_file and r not in st._unresolved_seen:
                         q.append(r)
@@ -450,6 +456,9 @@ class FilelistApplication:
 
         if getattr(ctx, "exit_code", None):
             return None
+        if st.unresolved_modules:
+            ctx.request_exit(1)
+            return None
 
         if not st.file_refs:
             ctx.fire(OnClosureEmptyAPI)
@@ -460,8 +469,15 @@ class FilelistApplication:
 
         premap = prerequisite_edges(st.file_refs, st.module_to_file)
         nodes = set(st.file_refs.keys()) | {x for ss in premap.values() for x in ss}
-        ordered = topo_prereq_first(premap, nodes)
-        rb = ResolvedBuild(head_lines=list(pre.head_lines), ordered_paths=ordered, state=st)
+        try:
+            before, ordered = schedule_prelude_dependencies(
+                premap, topo_prereq_first(premap, nodes), prelude_sources,
+            )
+        except ValueError as error:
+            ctx.fire(OnBuildOrderInvalidAPI, message=str(error))
+            return None
+        rb = ResolvedBuild(head_lines=list(pre.head_lines), ordered_paths=ordered, state=st,
+                           prelude_sources=prelude_sources, prelude_dependencies=before)
 
         ctx.fire(
             OnBuildTopologyReadyAPI,

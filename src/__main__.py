@@ -3,13 +3,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from rich.color import Color
-from rich.color_triplet import ColorTriplet
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
-from rich.style import Style
 from rich.table import Column
-from rich.text import Text
 
 import impl  # noqa: F401  — register sinks
 from core.dependency_debug_dump import DependencyDebugDump
@@ -22,7 +18,6 @@ from runtime.logging_setup import configure_cli_logging
 # 进度条：HueBar（按完成比例红→黄→绿）；宽度参与描述列留白计算（含 completed/total 列）。
 _PROGRESS_BAR_WIDTH = 28
 _PROGRESS_COUNT_COL = Column(min_width=7, max_width=9, justify="right")
-_WARN_STYLE = Style(color=Color.from_triplet(ColorTriplet(255, 220, 60)))
 
 
 def _description_table_column(console: Console, bar_width: int) -> Column:
@@ -96,13 +91,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(f"output: {args.output.resolve()}", file=sys.stderr)
-    for name in rb.state.unresolved_modules:
-        line = Text()
-        line.append("Warning", style=_WARN_STYLE)
-        line.append(f': Not found module "{name}"')
-        console.print(line)
-        if args.log_file is not None:
-            log.warning('Not found module "%s"', name)
     return 0
 
 

@@ -10,12 +10,13 @@ from api.events.filelist_build import (
 )
 from api.resolve.verilog_text import (
     JoinContinuedLinesAPI,
+    MaskPreprocessorCommentsAPI,
     ScanVerilogForDependenciesAPI,
     SqueezeForDependencyScanAPI,
 )
 from core.filelist_paths import format_incdir_line
 from core.path_logical import logical_abs
-from verilog_text.preproc import PreprocDirectiveParser
+from verilog_text.preproc import PreprocDirectiveParser, mask_preprocessor_comments
 from verilog_text.scan import scan_verilog_body
 from verilog_text.ref_index import collect_module_ref_sites
 from verilog_text.scan_trace import build_instance_scan_trace
@@ -114,6 +115,7 @@ def flatten_active_text(
     stack: set[Path],
     depth: int,
     ctx: Any | None = None,
+    dependency_files: list[Path] | None = None,
 ) -> str:
     """在同一套预处理状态下展开可参与依赖分析的源码（含活动分支内的 `include）。"""
     if depth > 96:
@@ -122,6 +124,8 @@ def flatten_active_text(
     if path in stack:
         return ""
     stack.add(path)
+    if dependency_files is not None:
+        dependency_files.append(path)
     try:
         dbg = getattr(ctx, "dependency_debug_dump", None) if ctx is not None else None
         raw = path.read_text(encoding="utf-8", errors="replace")
@@ -130,6 +134,10 @@ def flatten_active_text(
         else:
             joined = join_continued_lines(raw)
         text = strip_protected_regions(joined)
+        if ctx is not None:
+            text = ctx.fire(MaskPreprocessorCommentsAPI, source_text=text).masked_text
+        else:
+            text = mask_preprocessor_comments(text)
         if dbg is not None:
             dbg.write_text(path, "01_joined.txt", joined)
             dbg.write_text(path, "01b_strip_protected.txt", text)
@@ -145,7 +153,8 @@ def flatten_active_text(
                 if child is None and ctx is not None:
                     child = try_fd_resolve_include(spec, path, incdirs, ctx)
                 if child:
-                    sub = flatten_active_text(child, preproc, incdirs, stack, depth + 1, ctx)
+                    sub = flatten_active_text(child, preproc, incdirs, stack, depth + 1,
+                                              ctx, dependency_files)
                     if ctx is not None and getattr(ctx, "exit_code", None):
                         break
                     if sub:
@@ -177,12 +186,17 @@ def extract_dependencies_from_file(
     initial_defines: dict[str, str],
     *,
     ctx: Any | None = None,
+    output_defines: dict[str, str] | None = None,
+    dependency_files: list[Path] | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
     """返回该文件在宏环境下的已定义模块、引用模块与 include 路径串。"""
     pre = PreprocDirectiveParser(dict(initial_defines))
-    flat = flatten_active_text(path, pre, incdirs, set(), 0, ctx)
+    flat = flatten_active_text(path, pre, incdirs, set(), 0, ctx, dependency_files)
     if ctx is not None and getattr(ctx, "exit_code", None):
         return [], [], []
+    if output_defines is not None:
+        output_defines.clear()
+        output_defines.update(pre.defines)
     if ctx is not None:
         dbg = getattr(ctx, "dependency_debug_dump", None)
         if dbg is not None:

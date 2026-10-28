@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from verilog_text.scan import (
+    collect_package_imports,
     _consume_h_ws,
     _ENDMODULE,
     _MODULE_HEAD,
@@ -428,6 +429,9 @@ def squeeze_pipeline_for_dependency_scan(
     c = strip_decl_noise_lines(b)
     d = strip_module_port_regions(c)
     e = skeletonize_scanned_verilog_for_dependency_scan(d)
+    imports = collect_package_imports(a)
+    if imports:
+        e += "\n" + "\n".join(f"import {name}::*;" for name in imports)
     return a, b, c, d, e
 
 

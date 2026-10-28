@@ -36,7 +36,10 @@ def test_unresolved_modules_ordered_dedup(tmp_path: Path) -> None:
     )
 
     rb = app.run()
-    assert rb.state.unresolved_modules == ["missing_a", "missing_b"]
+    assert rb is None
+    assert ctx.exit_code == 1
+    assert ctx.session_state.unresolved_modules == ["missing_a", "missing_b"]
+    assert not (tmp_path / "out.f").exists()
 
 
 def test_shared_missing_module_find_file_once(tmp_path: Path) -> None:

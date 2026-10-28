@@ -3,11 +3,13 @@ from __future__ import annotations
 from api.resolve.verilog_text import (
     DropAlwaysishBlocksAPI,
     JoinContinuedLinesAPI,
+    MaskPreprocessorCommentsAPI,
     ScanVerilogForDependenciesAPI,
     StripVerilogCommentsAPI,
     SqueezeForDependencyScanAPI,
 )
 from verilog_text.scan import scan_verilog_body
+from verilog_text.preproc import mask_preprocessor_comments
 from verilog_text.squeeze import (
     drop_alwaysish_blocks,
     join_continued_lines,
@@ -20,6 +22,11 @@ from verilog_text.squeeze import (
 def resolve_join_continued_lines(cb: JoinContinuedLinesAPI) -> None:
     """Fold \\ line continuations before preprocessing."""
     cb.joined_text = join_continued_lines(cb.raw_text)
+
+
+@MaskPreprocessorCommentsAPI.register
+def resolve_mask_preprocessor_comments(cb: MaskPreprocessorCommentsAPI) -> None:
+    cb.masked_text = mask_preprocessor_comments(cb.source_text)
 
 
 @StripVerilogCommentsAPI.register

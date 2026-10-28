@@ -336,6 +336,12 @@ def _package_names_in_import_statement(stmt: str) -> list[str]:
     return _IMPORT_PKG_ITEM.findall(stmt)
 
 
+def collect_package_imports(text: str) -> list[str]:
+    """Collect package imports in every scope; DPI imports have no package clause."""
+    return sorted({name for m in re.finditer(r"\bimport\s+([^;]*);", text)
+                   for name in _package_names_in_import_statement(m.group(1))})
+
+
 def _collect_pkg_imports_from_module_or_package_header(body: str) -> list[str]:
     """解析 ``module``/``package`` 体首段：``import`` 声明（可跨行）直至 ``#(`` 或端口 ``(``。"""
     out: list[str] = []
@@ -767,51 +773,28 @@ def _split_module_regions_by_stack(text: str) -> list[tuple[str, str]] | None:
 
     若 ``endmodule`` 不平衡则返回 ``None``，由调用方回退到旧启发式。
     """
-    lines = text.splitlines(True)
-    offsets: list[int] = []
-    o = 0
-    for ln in lines:
-        offsets.append(o)
-        o += len(ln)
-    stack: list[tuple[str, int]] = []
-    regions: list[tuple[str, str]] = []
-    for i, line in enumerate(lines):
-        if _ENDMODULE_LINE.match(line):
-            if not stack:
-                continue
-            name, body_start = stack.pop()
-            body_end = offsets[i]
-            regions.append((name, text[body_start:body_end]))
-            continue
-        mm = _MODULE_LINE.match(line)
-        if mm:
-            stack.append((mm.group(1), offsets[i] + mm.end()))
-    if stack:
+    spans = _module_body_spans_by_stack(text)
+    if spans is None:
         return None
-    return regions
+    return [(name, text[start:end]) for name, start, end in spans]
 
 
 def _module_body_spans_by_stack(text: str) -> list[tuple[str, int, int]] | None:
     """与 ``_split_module_regions_by_stack`` 相同配对规则，返回 ``(模块名, body_start, body_end)`` 字符下标。"""
-    lines = text.splitlines(True)
-    offsets: list[int] = []
-    o = 0
-    for ln in lines:
-        offsets.append(o)
-        o += len(ln)
     stack: list[tuple[str, int]] = []
     spans: list[tuple[str, int, int]] = []
-    for i, line in enumerate(lines):
-        if _ENDMODULE_LINE.match(line):
+    tokens = re.compile(
+        r"\b(?:macromodule|module)\s+(?:(?:automatic|static)\s+)?([A-Za-z_]\w*)\b"
+        r"|\bendmodule\b"
+    )
+    for match in tokens.finditer(text):
+        if match.group(1) is None:
             if not stack:
                 continue
             name, body_start = stack.pop()
-            body_end = offsets[i]
-            spans.append((name, body_start, body_end))
-            continue
-        mm = _MODULE_LINE.match(line)
-        if mm:
-            stack.append((mm.group(1), offsets[i] + mm.end()))
+            spans.append((name, body_start, match.start()))
+        else:
+            stack.append((match.group(1), match.end()))
     if stack:
         return None
     return spans
@@ -844,6 +827,7 @@ def scan_verilog_body(text: str) -> VerilogSliceScan:
     """
     defs: list[str] = []
     refs: list[str] = []
+    refs.extend(collect_package_imports(text))
     incs: list[str] = []
     stacked = _split_module_regions_by_stack(text)
     if stacked is not None:
@@ -895,7 +879,8 @@ def scan_verilog_body(text: str) -> VerilogSliceScan:
                 incs.append(p.strip())
         _collect_refs_from_body(text, "", refs)
     prim_names = [m.group(1) for m in _PRIMITIVE_DEF_HEAD.finditer(text)]
-    defined = sorted(set(defs) | set(prim_names))
+    package_names = re.findall(r"\bpackage\s+(?:(?:automatic|static)\s+)?([A-Za-z_]\w*)\s*;", text)
+    defined = sorted(set(defs) | set(prim_names) | set(package_names))
     return VerilogSliceScan(
         defined_modules=defined,
         referenced_modules=sorted(set(refs)),

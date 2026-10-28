@@ -16,9 +16,15 @@ class OnPreludeLoadedAPI(BaseAPI):
 
 
 class OnModuleResolveMissAPI(BaseAPI):
-    """Emitted when fd/rg cannot locate a source file for a module name (at most once per name per run)."""
+    """Emitted once per unresolved definition; any unresolved name makes the build fail."""
 
     module_name: str = Field(description="Module name queued for parsing but not found on disk")
+
+
+class OnBuildOrderInvalidAPI(BaseAPI):
+    """Emitted when dependencies cannot precede fixed prelude sources."""
+
+    message: str = Field(description="Dependency ordering conflict")
 
 
 class OnIncludeResolveMissAPI(BaseAPI):
