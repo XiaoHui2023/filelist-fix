@@ -51,6 +51,7 @@ class ScanVerilogForDependenciesAPI(BaseAPI):
 
     scanned_text: str = Field(description="Squeezed flat source used for instance/module regex scan")
     semantic_text: str | None = Field(default=None, description="Active source before lossy instance filtering; declaration and scope authority")
+    symbols: dict[str, list[str]] = Field(default_factory=dict, description="Declared types, imported packages, scoped references and instance references")
     defined_modules: list[str] = Field(
         default_factory=list,
         description="本片段内定义的 module 名、Verilog ``primitive``（UDP）名，以及 ``package`` 名",

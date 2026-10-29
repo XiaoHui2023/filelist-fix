@@ -188,6 +188,7 @@ def extract_dependencies_from_file(
     ctx: Any | None = None,
     output_defines: dict[str, str] | None = None,
     dependency_files: list[Path] | None = None,
+    output_symbols: dict[str, list[str]] | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
     """返回该文件在宏环境下的已定义模块、引用模块与 include 路径串。"""
     pre = PreprocDirectiveParser(dict(initial_defines))
@@ -217,6 +218,8 @@ def extract_dependencies_from_file(
         if dbg is not None:
             assert squ == stages[4]
         r = ctx.fire(ScanVerilogForDependenciesAPI, scanned_text=squ, semantic_text=flat)
+        if output_symbols is not None:
+            output_symbols.update(r.symbols)
         if dbg is not None:
             dbg.write_text(
                 path,
@@ -232,4 +235,6 @@ def extract_dependencies_from_file(
         return r.defined_modules, r.referenced_modules, r.include_paths
     squ = squeeze_for_dependency_scan(flat)
     scan = scan_verilog_body(squ, flat)
+    if output_symbols is not None:
+        output_symbols.update(scan.symbols)
     return scan.defined_modules, scan.referenced_modules, scan.include_paths

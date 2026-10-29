@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 _ANCHOR_BEFORE_INSTANCE = frozenset(
     {
@@ -342,7 +342,7 @@ def collect_package_imports(text: str) -> list[str]:
                    for name in _package_names_in_import_statement(m.group(1))})
 
 
-def semantic_dependencies(text: str) -> tuple[list[str], list[str]]:
+def semantic_dependencies(text: str, symbols: dict[str, list[str]] | None = None) -> tuple[list[str], list[str]]:
     """Read declarations and scoped references before lossy instance filtering."""
     text = re.sub(r'"(?:\\.|[^"\\])*"|/\*.*?\*/|//[^\n]*',
                   lambda m: re.sub(r'[^\r\n]', ' ', m.group()), text, flags=re.DOTALL)
@@ -355,12 +355,17 @@ def semantic_dependencies(text: str) -> tuple[list[str], list[str]]:
         if alias:
             local_types.add(alias.group(1))
     local_types.update(re.findall(r'\b(?:parameter|localparam)\s+type\s+([A-Za-z_]\w*)', text))
+    if symbols is not None:
+        symbols['declared_types'] = sorted(local_types)
+        symbols['package_imports'] = collect_package_imports(text)
     for statement in re.findall(r'\bimport\s+([^;]*);', text):
         local_types.update(re.findall(r'::\s*([A-Za-z_]\w*)', statement))
     scopes = re.findall(r'(?<![\w$:\\])([A-Za-z_]\w*)\s*::\s*(?:[A-Za-z_]\w*|\*)'
                         r'(?:\s*::\s*(?:[A-Za-z_]\w*|\*))*', text)
     packages = set(collect_package_imports(text))
     packages.update(name for name in scopes if name not in local_types | {'local', 'super', 'this', 'std'})
+    if symbols is not None:
+        symbols['scope_references'] = sorted(packages - {'std'})
     return sorted(set(definitions)), sorted(packages - {'std'})
 
 
@@ -827,10 +832,10 @@ class VerilogSliceScan:
     defined_modules: list[str]
     referenced_modules: list[str]
     include_paths: list[str]
+    symbols: dict[str, list[str]] = field(default_factory=dict)
 
 
 def _collect_refs_from_body(body: str, self_mod: str, refs: list[str]) -> None:
-    refs.extend(_collect_pkg_imports_from_module_or_package_header(body))
     _collect_instance_refs_span_scan(body, self_mod, refs)
     for line in body.splitlines():
         bh = _parse_bind_line(line)
@@ -849,8 +854,8 @@ def scan_verilog_body(text: str, semantic_text: str | None = None) -> VerilogSli
     """
     defs: list[str] = []
     refs: list[str] = []
-    semantic_defs, semantic_refs = semantic_dependencies(text if semantic_text is None else semantic_text)
-    refs.extend(semantic_refs)
+    symbols: dict[str, list[str]] = {}
+    semantic_defs, semantic_refs = semantic_dependencies(text if semantic_text is None else semantic_text, symbols)
     incs: list[str] = []
     stacked = _split_module_regions_by_stack(text)
     if stacked is not None:
@@ -904,8 +909,12 @@ def scan_verilog_body(text: str, semantic_text: str | None = None) -> VerilogSli
     prim_names = [m.group(1) for m in _PRIMITIVE_DEF_HEAD.finditer(text)]
     package_names = re.findall(r"\bpackage\s+(?:(?:automatic|static)\s+)?([A-Za-z_]\w*)\s*;", text)
     defined = semantic_defs if semantic_text is not None else sorted(set(defs) | set(prim_names) | set(package_names))
+    symbols['instance_modules'] = sorted(set(refs))
+    all_refs = (set(refs) | set(semantic_refs)) - {'std'}
+    imports = set(symbols['package_imports']) & all_refs
     return VerilogSliceScan(
         defined_modules=defined,
-        referenced_modules=sorted(set(refs) - {'std'}),
+        referenced_modules=[*sorted(imports), *sorted(all_refs - imports)],
         include_paths=sorted(set(incs)),
+        symbols=symbols,
     )

@@ -120,10 +120,12 @@ def verify(executable: Path) -> dict:
         (sources / "netlist.sv").write_text(
             "module helper;\ninitial begin\n" + "  ;\n" * 600000 +
             "end endmodule\nmodule resolution_top;\n"
+            "import resolution_pkg::*;\ninitial $display(\"%d\", C::W);\n"
             "localparam int W = resolution_pkg::WIDTH;\n"
             "lib_a #(.W(resolution_pkg::WIDTH)) u();\nendmodule\n", encoding="utf-8")
         package = sources / "package_source.sv"
-        package.write_text("package resolution_pkg; parameter WIDTH=1; endpackage\n", encoding="utf-8")
+        package_text = "package resolution_pkg; parameter WIDTH=1; class C; parameter W=1; endclass endpackage\n"
+        package.write_text(package_text, encoding="utf-8")
         (library / "lib_a.model").write_text("module lib_a #(parameter W=1);\nlib_b u();\nendmodule\n", encoding="utf-8")
         lib_b = library / "lib_b.model"
         lib_b.write_text("module lib_b; endmodule\n", encoding="utf-8")
@@ -144,7 +146,7 @@ def verify(executable: Path) -> dict:
         assert 'Not found module "resolution_pkg"' in run(combined_args, 1).stderr
         assert combined_output.read_bytes() == preserved
         checked.append("missing_scoped_package_preserves_output")
-        package.write_text("package resolution_pkg; parameter WIDTH=1; endpackage\n", encoding="utf-8")
+        package.write_text(package_text, encoding="utf-8")
         lib_b.unlink()
         assert 'Not found module "lib_b"' in run(combined_args, 1).stderr
         assert combined_output.read_bytes() == preserved

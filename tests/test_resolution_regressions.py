@@ -96,6 +96,29 @@ def test_package_port_and_class_chain(tmp_path):
     assert (tmp_path / 'out.f').read_text().splitlines() == ['rtl/dep.sv', 'rtl/top.sv']
 
 
+def test_wildcard_imported_class_scope_is_not_a_package(tmp_path):
+    rtl = setup(tmp_path)
+    (rtl / 'dep.sv').write_text('package dep; class C; static function int f(); return 1; endfunction endclass endpackage\n')
+    (rtl / 'top.sv').write_text('module top;\nimport dep::*;\ninitial $display("%d", C::f());\nendmodule\n')
+    args = ['--save', tmp_path / 'cache.db']
+    for _ in range(2):
+        result = cli(tmp_path, *args)
+        assert result.returncode == 0, result.stderr
+        assert (tmp_path / 'out.f').read_text().splitlines() == ['rtl/dep.sv', 'rtl/top.sv']
+    (rtl / 'top.sv').write_text('module top;\nimport dep::*;\ninitial $display("%d", missing::W);\nendmodule\n')
+    assert cli(tmp_path, *args).returncode != 0
+
+
+def test_imported_class_name_does_not_erase_real_module_edge(tmp_path):
+    rtl = setup(tmp_path)
+    (rtl / 'dep.sv').write_text('package dep; class C; parameter W=1; endclass endpackage\n')
+    (rtl / 'C.sv').write_text('module C(input int x); endmodule\n')
+    (rtl / 'top.sv').write_text('module top;\nimport dep::*;\nC u(.x(C::W));\nendmodule\n')
+    result = cli(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert 'rtl/C.sv' in (tmp_path / 'out.f').read_text().splitlines()
+
+
 def library_fixture(root):
     rtl = setup(root)
     (rtl / 'top.sv').write_text('module top;\ncell_a u();\nendmodule\n')

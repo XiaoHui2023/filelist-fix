@@ -24,10 +24,13 @@ def verify(oracle: Path) -> dict:
         inputs = {
             rtl / 'netlist.sv': 'module helper;\ninitial begin\n' + '  ;\n' * 600000 +
                 'end endmodule\nmodule top(input dep::item_t x);\n'
+                'import dep::*;\ninitial $display("%d", C::W);\n'
+                'C same_name_instance(.x(C::W));\n'
                 'localparam int W=dep::WIDTH;\ncell_a #(.W(dep::WIDTH)) u();\n'
                 'initial $display("%d", dep::C::W);\nendmodule\n',
             rtl / 'package_source.sv': 'package dep; typedef int item_t; parameter WIDTH=1; '
                 'class C; parameter W=1; endclass endpackage\n',
+            rtl / 'C.sv': 'module C(input int x); endmodule\n',
             lib / 'cell_a.model': 'module cell_a #(parameter W=1);\ncell_b u();\nendmodule\n',
             lib / 'cell_b.model': 'module cell_b; endmodule\n',
             work / 'pre.f': '-y lib\n+libext+.model\n',
@@ -60,7 +63,8 @@ def verify(oracle: Path) -> dict:
             assert cp.returncode == 1, cp.stdout + cp.stderr
             checks.append({'case': 'omit_' + omitted, 'expected_rejection': True,
                            'diagnostics': cp.stdout + cp.stderr})
-    return {'oracle': 'pyslang', 'checks': checks, 'seconds': round(time.monotonic() - started, 3)}
+    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+    return {'oracle': 'pyslang', 'source_sha': revision, 'checks': checks, 'seconds': round(time.monotonic() - started, 3)}
 
 
 if __name__ == '__main__':

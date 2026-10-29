@@ -54,3 +54,4 @@ def resolve_scan_verilog_for_deps(cb: ScanVerilogForDependenciesAPI) -> None:
     cb.defined_modules = r.defined_modules
     cb.referenced_modules = r.referenced_modules
     cb.include_paths = r.include_paths
+    cb.symbols = r.symbols

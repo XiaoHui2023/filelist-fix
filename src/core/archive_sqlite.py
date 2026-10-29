@@ -25,9 +25,10 @@ class CachedFileRecord:
     incdirs_json: str
     dependency_sigs_json: str = "[]"
     discovered_incdirs_json: str = "[]"
+    symbols_json: str = "{}"
 
 
-_ARCHIVE_SCHEMA_VERSION = "6"
+_ARCHIVE_SCHEMA_VERSION = "7"
 
 
 class FileParseArchive:
@@ -107,6 +108,8 @@ class FileParseArchive:
             self._conn.execute(
                 "ALTER TABLE file_cache ADD COLUMN discovered_incdirs_json TEXT NOT NULL DEFAULT '[]'"
             )
+        if "symbols_json" not in cols:
+            self._conn.execute("ALTER TABLE file_cache ADD COLUMN symbols_json TEXT NOT NULL DEFAULT '{}'")
         self._conn.commit()
 
     def _ensure_archive_schema_meta(self) -> None:
@@ -155,6 +158,7 @@ class FileParseArchive:
             incdirs_json=str(row[7]) if len(row) > 7 else "[]",
             dependency_sigs_json=str(row[8]) if len(row) > 8 else "[]",
             discovered_incdirs_json=str(row[9]) if len(row) > 9 else "[]",
+            symbols_json=str(row[10]) if len(row) > 10 else "{}",
         )
 
     def get_valid(self, path: Path) -> CachedFileRecord | None:
@@ -252,6 +256,7 @@ class FileParseArchive:
         *,
         dependency_files: list[Path] | None = None,
         discovered_incdirs: list[Path] | None = None,
+        symbols: dict[str, list[str]] | None = None,
     ) -> None:
         if self._conn is None:
             return
@@ -268,9 +273,9 @@ class FileParseArchive:
             """
             INSERT INTO file_cache(
                 path,mtime_ns,size,defined_modules,referenced_modules,raw_includes,
-                defines_sig,incdirs_json,dependency_sigs_json,discovered_incdirs_json
+                defines_sig,incdirs_json,dependency_sigs_json,discovered_incdirs_json,symbols_json
             )
-            VALUES(?,?,?,?,?,?,?,?,?,?)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(path) DO UPDATE SET
               mtime_ns=excluded.mtime_ns,
               size=excluded.size,
@@ -280,7 +285,8 @@ class FileParseArchive:
               defines_sig=excluded.defines_sig,
               incdirs_json=excluded.incdirs_json,
               dependency_sigs_json=excluded.dependency_sigs_json,
-              discovered_incdirs_json=excluded.discovered_incdirs_json
+              discovered_incdirs_json=excluded.discovered_incdirs_json,
+              symbols_json=excluded.symbols_json
             """,
             (
                 key,
@@ -293,6 +299,7 @@ class FileParseArchive:
                 inc_json,
                 dependency_sigs,
                 json.dumps([str(p) for p in discovered_incdirs or []]),
+                json.dumps(symbols or {}),
             ),
         )
         self._conn.commit()

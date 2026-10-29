@@ -62,6 +62,9 @@ class FilelistSessionState:
 
     module_to_file: dict[str, Path] = field(default_factory=dict)
     file_refs: dict[Path, list[str]] = field(default_factory=dict)
+    file_symbols: dict[Path, dict[str, list[str]]] = field(default_factory=dict)
+    scope_resolution_dirty: bool = False
+    satisfied_type_scopes: set[str] = field(default_factory=set)
     parsed_resolved: set[Path] = field(default_factory=set)
     defines: dict[str, str] = field(default_factory=dict)
     incdirs: list[Path] = field(default_factory=list)
@@ -86,6 +89,11 @@ class FilelistSessionState:
 
     def note_inode_parsed(self, hit: Path) -> None:
         self.parsed_resolved.add(logical_abs(hit).resolve())
+
+    def note_symbols(self, path: Path, symbols: dict[str, list[str]]) -> None:
+        self.file_symbols[path] = symbols
+        if symbols.get('declared_types') or symbols.get('package_imports'):
+            self.scope_resolution_dirty = True
 
     def note_unresolved(self, name: str) -> None:
         """未找到定义时记录一次；并将该名记入 ``_unresolved_seen``，本会话内不再 fd/rg、不再入队。"""
@@ -238,6 +246,22 @@ class FilelistApplication:
             st.module_to_file.setdefault(name, hit)
         return True
 
+    @staticmethod
+    def _discard_imported_type_refs(st: FilelistSessionState) -> None:
+        """Resolve scope-only names through the packages imported by that file."""
+        if not st.scope_resolution_dirty:
+            return
+        st.scope_resolution_dirty = False
+        for path, refs in st.file_refs.items():
+            symbols = st.file_symbols.get(path, {})
+            imported_types: set[str] = set()
+            for package in symbols.get('package_imports', []):
+                package_path = st.module_to_file.get(package)
+                imported_types.update(st.file_symbols.get(package_path, {}).get('declared_types', []))
+            removable = (imported_types & set(symbols.get('scope_references', []))) - set(symbols.get('instance_modules', []))
+            st.satisfied_type_scopes.update(removable)
+            st.file_refs[path] = [name for name in refs if name not in removable]
+
     def _emit_filelist_file(self, ctx: Any, rb: ResolvedBuild) -> None:
         ctx.fire(
             OnProgressAPI,
@@ -311,8 +335,9 @@ class FilelistApplication:
             else:
                 hit = st.canonical_source_path(entry.path)
                 before_incdirs = list(st.incdirs)
+                symbols: dict[str, list[str]] = {}
                 defs, refs, _ = extract_dependencies_from_file(
-                    hit, st.incdirs, st.defines, ctx=ctx, output_defines=st.defines,
+                    hit, st.incdirs, st.defines, ctx=ctx, output_defines=st.defines, output_symbols=symbols,
                 )
                 if getattr(ctx, "exit_code", None):
                     return None
@@ -322,6 +347,7 @@ class FilelistApplication:
                 if not self._register_defined_modules(ctx, st, hit, defs):
                     return None
                 st.file_refs[hit] = list(refs)
+                st.note_symbols(hit, symbols)
                 st.note_inode_parsed(hit)
                 prelude_sources[entry.line_index] = hit
                 prelude_refs.extend(refs)
@@ -364,6 +390,9 @@ class FilelistApplication:
                 break
             mod = q.popleft()
             try:
+                self._discard_imported_type_refs(st)
+                if mod in st.satisfied_type_scopes and mod not in self._tops and not any(mod in refs for refs in st.file_refs.values()):
+                    continue
                 _fire_closure_progress(
                     ctx,
                     closure_done,
@@ -429,6 +458,7 @@ class FilelistApplication:
                     defs = json.loads(cached.defined_modules)
                     refs = json.loads(cached.referenced_modules)
                     incs = json.loads(cached.raw_includes)
+                    symbols = json.loads(cached.symbols_json)
                     self._restore_discovered_incdirs(
                         st, hit, [Path(p) for p in json.loads(cached.discovered_incdirs_json)],
                     )
@@ -436,16 +466,17 @@ class FilelistApplication:
                     if log is not None and log.isEnabledFor(logging.DEBUG):
                         log.debug("extract dependencies from %s", hit)
                     dependencies: list[Path] = []
+                    symbols = {}
                     before_incdirs = list(st.incdirs)
                     defs, refs, incs = extract_dependencies_from_file(
-                        hit, st.incdirs, st.defines, ctx=ctx, dependency_files=dependencies,
+                        hit, st.incdirs, st.defines, ctx=ctx, dependency_files=dependencies, output_symbols=symbols,
                     )
                     if getattr(ctx, "exit_code", None):
                         break
                     discovered = [p for p in st.incdirs if p not in before_incdirs]
                     self._restore_discovered_incdirs(st, hit, discovered)
                     self._save.put(hit, defs, refs, incs, dependency_files=dependencies,
-                                   discovered_incdirs=discovered)
+                                   discovered_incdirs=discovered, symbols=symbols)
 
                 if getattr(ctx, "exit_code", None):
                     break
@@ -473,13 +504,14 @@ class FilelistApplication:
                 if not self._register_defined_modules(ctx, st, hit, defs):
                     break
                 st.file_refs[hit] = list(refs)
+                st.note_symbols(hit, symbols)
                 st.note_inode_parsed(hit)
                 if mod not in defs:
                     st.note_unresolved(mod)
                     ctx.fire(OnModuleResolveMissAPI, module_name=mod)
-                for r in refs:
+                for r in reversed(refs):
                     if r not in st.module_to_file and r not in st._unresolved_seen:
-                        q.append(r)
+                        q.appendleft(r)
                         if log is not None and log.isEnabledFor(logging.DEBUG):
                             log.debug("queue module %r (referenced from %s)", r, hit)
 
