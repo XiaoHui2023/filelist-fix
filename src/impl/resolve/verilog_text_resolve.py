@@ -7,13 +7,14 @@ from api.resolve.verilog_text import (
     ScanVerilogForDependenciesAPI,
     StripVerilogCommentsAPI,
     SqueezeForDependencyScanAPI,
+    ScanSemanticDependenciesAPI,
 )
-from verilog_text.scan import scan_verilog_body
+from verilog_text.scan import scan_verilog_body, semantic_dependencies
 from verilog_text.preproc import mask_preprocessor_comments
 from verilog_text.squeeze import (
     drop_alwaysish_blocks,
     join_continued_lines,
-    squeeze_for_dependency_scan,
+    squeeze_pipeline_for_dependency_scan,
     strip_comments_preserve_strings,
 )
 
@@ -44,14 +45,21 @@ def resolve_drop_alwaysish(cb: DropAlwaysishBlocksAPI) -> None:
 @SqueezeForDependencyScanAPI.register
 def resolve_squeeze_for_dep_scan(cb: SqueezeForDependencyScanAPI) -> None:
     """Run squeeze pipeline (comments, procedural blocks, decl noise, module port preambles) before scan."""
-    cb.squeezed_text = squeeze_for_dependency_scan(cb.source_text)
+    cb.stages = list(squeeze_pipeline_for_dependency_scan(cb.source_text,
+        package_references=cb.package_references, skeletonize=cb.skeletonize))
+    cb.squeezed_text = cb.stages[-1]
 
 
 @ScanVerilogForDependenciesAPI.register
 def resolve_scan_verilog_for_deps(cb: ScanVerilogForDependenciesAPI) -> None:
     """Populate module/include scan fields from squeezed text."""
-    r = scan_verilog_body(cb.scanned_text, cb.semantic_text)
+    r = scan_verilog_body(cb.scanned_text, cb.semantic_text, semantic_result=cb.semantic_result)
     cb.defined_modules = r.defined_modules
     cb.referenced_modules = r.referenced_modules
     cb.include_paths = r.include_paths
     cb.symbols = r.symbols
+
+
+@ScanSemanticDependenciesAPI.register
+def resolve_semantic_dependencies(cb: ScanSemanticDependenciesAPI) -> None:
+    cb.defined, cb.referenced = semantic_dependencies(cb.source_text, cb.symbols)

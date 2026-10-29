@@ -40,6 +40,9 @@ class SqueezeForDependencyScanAPI(BaseAPI):
     """Ordered squeeze pipeline before module/instance regex scan."""
 
     source_text: str = Field(description="Flattened active-branch source text")
+    package_references: list[str] | None = Field(default=None, description="Already collected semantic references; None requests standalone collection")
+    skeletonize: bool = Field(default=True, description="Blank instance ports for diagnostic rendering; dependency scan can consume full ports")
+    stages: list[str] = Field(default_factory=list, description="Five intermediate squeeze outputs, computed once")
     squeezed_text: str = Field(
         default="",
         description="After comments, procedural-block drop, decl-noise blanking, port-header strip, and instance-port skeletonization",
@@ -51,6 +54,7 @@ class ScanVerilogForDependenciesAPI(BaseAPI):
 
     scanned_text: str = Field(description="Squeezed flat source used for instance/module regex scan")
     semantic_text: str | None = Field(default=None, description="Active source before lossy instance filtering; declaration and scope authority")
+    semantic_result: tuple[list[str], list[str], dict[str, list[str]]] | None = Field(default=None, description="Per-file precomputed declarations, references and symbols")
     symbols: dict[str, list[str]] = Field(default_factory=dict, description="Declared types, imported packages, scoped references and instance references")
     defined_modules: list[str] = Field(
         default_factory=list,
@@ -64,3 +68,12 @@ class ScanVerilogForDependenciesAPI(BaseAPI):
         default_factory=list,
         description="Paths taken from include directives in the scanned fragment",
     )
+
+
+class ScanSemanticDependenciesAPI(BaseAPI):
+    """Collect declarations and scoped references once before lossy filtering."""
+
+    source_text: str = Field(description="Active source text")
+    defined: list[str] = Field(default_factory=list, description="Declared design units")
+    referenced: list[str] = Field(default_factory=list, description="Package and scope references")
+    symbols: dict[str, list[str]] = Field(default_factory=dict, description="Declaration and scope metadata")

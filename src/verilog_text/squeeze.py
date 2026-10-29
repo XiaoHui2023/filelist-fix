@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from verilog_text.parse_budget import parse_stage
 
 from verilog_text.scan import (
     semantic_dependencies,
@@ -409,6 +410,7 @@ def strip_module_port_regions(text: str) -> str:
 
 def squeeze_pipeline_for_dependency_scan(
     src: str,
+    *, package_references: list[str] | None = None, skeletonize: bool = True,
 ) -> tuple[str, str, str, str, str]:
     """与 ``squeeze_for_dependency_scan`` 相同的各步中间结果，供调试写出。
 
@@ -424,15 +426,23 @@ def squeeze_pipeline_for_dependency_scan(
         #. **scan_input**：已识别例化的端口表内置空白，再送入 ``scan_verilog_body``。
     """
 
-    a = strip_comments_preserve_strings(strip_protected_regions(src))
+    with parse_stage("squeeze.comments"):
+        a = strip_comments_preserve_strings(strip_protected_regions(src))
     # Keep unit boundaries outside heuristic statement deletion.
-    b = drop_alwaysish_blocks(re.sub(r'\bendmodule\b', '\nendmodule\n', a))
-    b = re.sub(r'\b(?:extern|pure\s+virtual)\s+function\b[^;]*;', '', b)
-    b = re.sub(r'\bfunction\b.*?\bendfunction\b', '', b, flags=re.DOTALL)
-    c = strip_decl_noise_lines(b)
-    d = strip_module_port_regions(c)
-    e = skeletonize_scanned_verilog_for_dependency_scan(d)
-    _, imports = semantic_dependencies(a)
+    with parse_stage("squeeze.procedural"):
+        b = drop_alwaysish_blocks(re.sub(r'\bendmodule\b', '\nendmodule\n', a))
+        b = re.sub(r'\b(?:extern|pure\s+virtual)\s+function\b[^;]*;', '', b)
+        b = re.sub(r'\bfunction\b.*?\bendfunction\b', '', b, flags=re.DOTALL)
+    with parse_stage("squeeze.declarations"):
+        c = strip_decl_noise_lines(b)
+    with parse_stage("squeeze.headers"):
+        d = strip_module_port_regions(c)
+    with parse_stage("squeeze.ports"):
+        e = skeletonize_scanned_verilog_for_dependency_scan(d) if skeletonize else d
+    if package_references is None:
+        _, imports = semantic_dependencies(a)
+    else:
+        imports = package_references
     if imports:
         e += "\n" + "\n".join(f"import {name}::*;" for name in imports)
     return a, b, c, d, e

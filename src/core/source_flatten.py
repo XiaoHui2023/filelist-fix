@@ -13,16 +13,18 @@ from api.resolve.verilog_text import (
     MaskPreprocessorCommentsAPI,
     ScanVerilogForDependenciesAPI,
     SqueezeForDependencyScanAPI,
+    ScanSemanticDependenciesAPI,
 )
 from core.filelist_paths import format_incdir_line
 from core.path_logical import logical_abs
+from core.parse_monitor import monitor_source
+from verilog_text.parse_budget import check_parse_budget, parse_stage
 from verilog_text.preproc import PreprocDirectiveParser, mask_preprocessor_comments
-from verilog_text.scan import scan_verilog_body
+from verilog_text.scan import scan_verilog_body, semantic_dependencies
 from verilog_text.ref_index import collect_module_ref_sites
 from verilog_text.scan_trace import build_instance_scan_trace
 from verilog_text.squeeze import (
     join_continued_lines,
-    squeeze_for_dependency_scan,
     squeeze_pipeline_for_dependency_scan,
     strip_protected_regions,
 )
@@ -128,21 +130,25 @@ def flatten_active_text(
         dependency_files.append(path)
     try:
         dbg = getattr(ctx, "dependency_debug_dump", None) if ctx is not None else None
-        raw = path.read_text(encoding="utf-8", errors="replace")
-        if ctx is not None:
-            joined = ctx.fire(JoinContinuedLinesAPI, raw_text=raw).joined_text
-        else:
-            joined = join_continued_lines(raw)
-        text = strip_protected_regions(joined)
-        if ctx is not None:
-            text = ctx.fire(MaskPreprocessorCommentsAPI, source_text=text).masked_text
-        else:
-            text = mask_preprocessor_comments(text)
+        with parse_stage("read", str(path)):
+            raw = path.read_text(encoding="utf-8", errors="replace")
+        with parse_stage("join", str(path)):
+            if ctx is not None:
+                joined = ctx.fire(JoinContinuedLinesAPI, raw_text=raw).joined_text
+            else:
+                joined = join_continued_lines(raw)
+        with parse_stage("mask", str(path)):
+            text = strip_protected_regions(joined)
+            if ctx is not None:
+                text = ctx.fire(MaskPreprocessorCommentsAPI, source_text=text).masked_text
+            else:
+                text = mask_preprocessor_comments(text)
         if dbg is not None:
             dbg.write_text(path, "01_joined.txt", joined)
             dbg.write_text(path, "01b_strip_protected.txt", text)
         chunks: list[str] = []
         for line in text.splitlines():
+            check_parse_budget()
             if preproc.handle_directive_line(line):
                 continue
             inc = _INCLUDE.match(line)
@@ -190,9 +196,22 @@ def extract_dependencies_from_file(
     dependency_files: list[Path] | None = None,
     output_symbols: dict[str, list[str]] | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
+    """Extract one source/include tree with phase observations and a parse budget."""
+    with monitor_source(path, ctx):
+        return _extract_dependencies_from_file(path, incdirs, initial_defines, ctx=ctx,
+            output_defines=output_defines, dependency_files=dependency_files, output_symbols=output_symbols)
+
+
+def _extract_dependencies_from_file(
+    path: Path, incdirs: list[Path], initial_defines: dict[str, str], *,
+    ctx: Any | None = None, output_defines: dict[str, str] | None = None,
+    dependency_files: list[Path] | None = None,
+    output_symbols: dict[str, list[str]] | None = None,
+) -> tuple[list[str], list[str], list[str]]:
     """返回该文件在宏环境下的已定义模块、引用模块与 include 路径串。"""
     pre = PreprocDirectiveParser(dict(initial_defines))
-    flat = flatten_active_text(path, pre, incdirs, set(), 0, ctx, dependency_files)
+    with parse_stage("preprocess"):
+        flat = flatten_active_text(path, pre, incdirs, set(), 0, ctx, dependency_files)
     if ctx is not None and getattr(ctx, "exit_code", None):
         return [], [], []
     if output_defines is not None:
@@ -200,24 +219,31 @@ def extract_dependencies_from_file(
         output_defines.update(pre.defines)
     if ctx is not None:
         dbg = getattr(ctx, "dependency_debug_dump", None)
+        with parse_stage("semantic"):
+            semantic = ctx.fire(ScanSemanticDependenciesAPI, source_text=flat)
+            semantic_result = (semantic.defined, semantic.referenced, semantic.symbols)
+        with parse_stage("squeeze"):
+            squeezed = ctx.fire(SqueezeForDependencyScanAPI, source_text=flat,
+                                 package_references=semantic.referenced, skeletonize=dbg is not None)
+            squ = squeezed.squeezed_text
         if dbg is not None:
-            stages = squeeze_pipeline_for_dependency_scan(flat)
-            dbg.write_text(path, "03a_strip_comments.txt", stages[0])
-            dbg.write_text(path, "03b_drop_alwaysish.txt", stages[1])
-            dbg.write_text(path, "03c_strip_decl_noise.txt", stages[2])
-            dbg.write_text(path, "03d0_pre_strip_module_ports.txt", stages[2])
-            dbg.write_text(path, "03d_strip_module_ports.txt", stages[3])
-            dbg.write_text(path, "03e_scan_input.txt", stages[4])
-            dbg.write_text(
-                path,
-                "05_instance_scan_trace.txt",
-                build_instance_scan_trace(stages[4]),
-            )
-            dbg.record_ref_sites(path, collect_module_ref_sites(stages[4]))
-        squ = ctx.fire(SqueezeForDependencyScanAPI, source_text=flat).squeezed_text
-        if dbg is not None:
-            assert squ == stages[4]
-        r = ctx.fire(ScanVerilogForDependenciesAPI, scanned_text=squ, semantic_text=flat)
+            with parse_stage("diagnostics"):
+                stages = squeezed.stages
+                dbg.write_text(path, "03a_strip_comments.txt", stages[0])
+                dbg.write_text(path, "03b_drop_alwaysish.txt", stages[1])
+                dbg.write_text(path, "03c_strip_decl_noise.txt", stages[2])
+                dbg.write_text(path, "03d0_pre_strip_module_ports.txt", stages[2])
+                dbg.write_text(path, "03d_strip_module_ports.txt", stages[3])
+                dbg.write_text(path, "03e_scan_input.txt", stages[4])
+                dbg.write_text(
+                    path,
+                    "05_instance_scan_trace.txt",
+                    build_instance_scan_trace(stages[4]),
+                )
+                dbg.record_ref_sites(path, collect_module_ref_sites(stages[4]))
+        with parse_stage("instances"):
+            r = ctx.fire(ScanVerilogForDependenciesAPI, scanned_text=squ, semantic_text=flat,
+                         semantic_result=semantic_result)
         if output_symbols is not None:
             output_symbols.update(r.symbols)
             output_symbols.update(pre.macro_symbols())
@@ -234,8 +260,13 @@ def extract_dependencies_from_file(
                 + "\n",
             )
         return r.defined_modules, r.referenced_modules, r.include_paths
-    squ = squeeze_for_dependency_scan(flat)
-    scan = scan_verilog_body(squ, flat)
+    with parse_stage("semantic"):
+        symbols: dict[str, list[str]] = {}
+        defined, referenced = semantic_dependencies(flat, symbols)
+    with parse_stage("squeeze"):
+        squ = squeeze_pipeline_for_dependency_scan(flat, package_references=referenced, skeletonize=False)[-1]
+    with parse_stage("instances"):
+        scan = scan_verilog_body(squ, flat, semantic_result=(defined, referenced, symbols))
     if output_symbols is not None:
         output_symbols.update(scan.symbols)
         output_symbols.update(pre.macro_symbols())

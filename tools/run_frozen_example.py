@@ -11,6 +11,7 @@ import tempfile
 import time
 
 from release_support import ROOT, sha
+from stress_dependency_scan import source_corpus, check_result, KINDS
 
 
 def verify(executable: Path) -> dict:
@@ -173,9 +174,35 @@ def verify(executable: Path) -> dict:
         assert "WIDTH" in run(macro_args, 1).stderr
         assert macro_output.read_bytes() == preserved
         checked.append("macro_package_cycle_preserves_output")
+        stress_dir = work / "performance"
+        stress_dir.mkdir()
+        (stress_dir / "child.sv").write_text("module child(input a); endmodule\n")
+        (stress_dir / "p.sv").write_text("package p; parameter int VALUE=1; endpackage\n")
+        stress_output = stress_dir / "out.f"
+        timing = stress_dir / "timing.json"
+        stress_samples = []
+        for count in (4038, 40380):
+            for kind in KINDS:
+                (stress_dir / "top.sv").write_text(source_corpus(kind, count))
+                args = ["-s", str(stress_dir), "-t", "top", "-o", str(stress_output),
+                        "--parse-timings", str(timing)]
+                then = time.monotonic()
+                cp = run(args)
+                elapsed = time.monotonic() - then
+                expected = (["child.sv", "top.sv"] if kind == "instances" else
+                            ["child.sv", "p.sv", "top.sv"] if kind == "conditional" else ["top.sv"])
+                check_result(cp.returncode, elapsed, 10, stress_output.read_text().splitlines(), expected)
+                assert all(f["status"] == "ok" for f in json.loads(timing.read_text())["files"])
+                stress_samples.append({"kind": kind, "count": count, "seconds": elapsed})
+        checked.append("six_large_corpora_4040_and_40382_lines_under_10s")
+        preserved = stress_output.read_bytes()
+        run([*args, "--parse-timeout", "0.000000001"], 2)
+        assert stress_output.read_bytes() == preserved
+        assert json.loads(timing.read_text())["files"][0]["status"] == "failed"
+        checked.append("parse_timeout_preserves_old_list_and_failure_timing")
     return {"executable": executable.name, "sha256": sha(executable), "features": checked,
             "seconds": round(time.monotonic() - started, 3), "independent_cwd": True,
-            "empty_path": True, "source_imports_disabled": True}
+            "empty_path": True, "source_imports_disabled": True, "stress_samples": stress_samples}
 
 
 if __name__ == "__main__":

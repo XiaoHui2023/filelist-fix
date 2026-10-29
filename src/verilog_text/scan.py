@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from verilog_text.parse_budget import check_parse_budget
 from dataclasses import dataclass, field
 
 _ANCHOR_BEFORE_INSTANCE = frozenset(
@@ -40,9 +41,9 @@ _ID_HEAD = re.compile(r"([A-Za-z_]\w*)\b")
 _TYPEDEF_KW = re.compile(r"\btypedef\b")
 
 _MODULE_HEAD = re.compile(
-    r"(?m)^\s*module\s+(?:automatic\s+)?([A-Za-z_]\w*)\b",
+    r"(?m)^[ \t]*module\s+(?:automatic\s+)?([A-Za-z_]\w*)\b",
 )
-_ENDMODULE = re.compile(r"(?m)^\s*endmodule\b")
+_ENDMODULE = re.compile(r"(?m)^[ \t]*endmodule\b")
 # 行首配对：支持 ``macromodule`` / ``module`` 与嵌套 ``endmodule``（不依赖「首个 endmodule」启发式）。
 _MODULE_LINE = re.compile(
     r"^\s*(?:macromodule\s+|module\s+(?:automatic\s+)?)([A-Za-z_]\w*)\b",
@@ -54,9 +55,9 @@ _PACKAGE_LINE = re.compile(
 )
 _ENDPACKAGE_LINE = re.compile(r"^\s*endpackage\b")
 # 用户定义原语（UDP）：与 module 不同关键字，例化形态与模块相同。
-_PRIMITIVE_DEF_HEAD = re.compile(r"(?m)^\s*primitive\s+([A-Za-z_]\w*)\b")
+_PRIMITIVE_DEF_HEAD = re.compile(r"(?m)^[ \t]*primitive\s+([A-Za-z_]\w*)\b")
 # ``import pkg::*`` / ``import pkg::sym`` 中包名（多行 ``import`` 直至分号）。
-_IMPORT_PKG_ITEM = re.compile(r"([A-Za-z_]\w*)\s*::\s*(?:\*|[A-Za-z_]\w*)")
+_IMPORT_PKG_ITEM = re.compile(r"\b([A-Za-z_]\w*)\s*::\s*(?:\*|[A-Za-z_]\w*)")
 _INCLUDE = re.compile(r"^\s*`include\s+(?:\"([^\"]+)\"|<([^>]+)>)\s*$")
 _kw = frozenset(
     {
@@ -355,16 +356,18 @@ def semantic_dependencies(text: str, symbols: dict[str, list[str]] | None = None
         if alias:
             local_types.add(alias.group(1))
     local_types.update(re.findall(r'\b(?:parameter|localparam)\s+type\s+([A-Za-z_]\w*)', text))
+    imports = collect_package_imports(text)
     if symbols is not None:
         symbols['package_definitions'] = re.findall(r'\bpackage\s+(?:(?:automatic|static)\s+)?([A-Za-z_]\w*)\b', text)
         symbols['declared_types'] = sorted(local_types)
-        symbols['package_imports'] = collect_package_imports(text)
+        symbols['package_imports'] = imports
     for statement in re.findall(r'\bimport\s+([^;]*);', text):
         local_types.update(re.findall(r'::\s*([A-Za-z_]\w*)', statement))
     scopes = re.findall(r'(?<![\w$:\\])([A-Za-z_]\w*)\s*::\s*(?:[A-Za-z_]\w*|\*)'
                         r'(?:\s*::\s*(?:[A-Za-z_]\w*|\*))*', text)
-    packages = set(collect_package_imports(text))
-    packages.update(name for name in scopes if name not in local_types | {'local', 'super', 'this', 'std'})
+    packages = set(imports)
+    excluded_scopes = local_types | {'local', 'super', 'this', 'std'}
+    packages.update(name for name in scopes if name not in excluded_scopes)
     if symbols is not None:
         symbols['scope_references'] = sorted(packages - {'std'})
     return sorted(set(definitions)), sorted(packages - {'std'})
@@ -476,8 +479,16 @@ def _is_begin_colon_block_label(s: str, label_id_end: int) -> bool:
     lo = label_id_end
     while lo - 1 >= 0 and (s[lo - 1].isalnum() or s[lo - 1] == "_"):
         lo -= 1
-    head = s[:lo].rstrip(" \t")
-    return bool(re.search(r"\bbegin\s*:\s*$", head))
+    # Inspect only the preceding tokens; searching every growing prefix is quadratic.
+    j = lo - 1
+    while j >= 0 and s[j] in " \t":
+        j -= 1
+    if j < 0 or s[j] != ":":
+        return False
+    j -= 1
+    while j >= 0 and s[j].isspace():
+        j -= 1
+    return _word_ending_at(s, j) == "begin"
 
 
 def _word_ending_at(s: str, j: int) -> str | None:
@@ -521,6 +532,8 @@ def _skip_balanced_parens(s: str, i: int) -> int:
         return i
     depth = 0
     while i < n:
+        if i % 4096 == 0:
+            check_parse_budget()
         c = s[i]
         if c == "(":
             depth += 1
@@ -627,47 +640,45 @@ def _try_parse_module_instantiation_span(s: str, pos: int, self_mod: str) -> _Mo
 
 def _collect_instance_refs_span_scan(body: str, self_mod: str, refs: list[str]) -> None:
     """跨行例化：仅在锚点处尝试解析，避免实例名被当成模块类型。"""
+    for _, (hit, _) in iter_instance_details(body, self_mod):
+        if not _is_primitive_gate_type(hit.mod_type):
+            refs.append(hit.mod_type)
+
+
+def iter_instance_details(body: str, self_mod: str):
+    """Visit identifier candidates once and skip completed statements / typedefs."""
     pos = 0
-    n = len(body)
-    td_spans = _typedef_declaration_spans(body)
-    while pos < n:
-        if _pos_in_any_span(pos, td_spans):
-            pos += 1
+    spans = _typedef_declaration_spans(body)
+    span_index = 0
+    while match := _ID_HEAD.search(body, pos):
+        check_parse_budget()
+        pos = match.start()
+        while span_index < len(spans) and spans[span_index][1] <= pos:
+            span_index += 1
+        if span_index < len(spans) and spans[span_index][0] <= pos:
+            pos = spans[span_index][1]
             continue
         if _at_instance_scan_anchor(body, pos):
-            hit = _try_parse_module_instantiation_span(body, pos, self_mod)
+            hit = _try_parse_module_instantiation_detail(body, pos, self_mod)
             if hit:
-                if not _is_primitive_gate_type(hit.mod_type):
-                    refs.append(hit.mod_type)
-                pos = hit.end
+                yield pos, hit
+                pos = hit[0].end
                 continue
-        pos += 1
+        pos = match.end()
 
 
 def skeletonize_body_instance_ports(body: str, self_mod: str) -> str:
     """将本段内已识别例化的最外层端口括弧内部换成空白，便于基于行的检索且不改变括号层级。"""
-    spans: list[_ModuleInstSpan] = []
-    pos = 0
-    n = len(body)
-    td_spans = _typedef_declaration_spans(body)
-    while pos < n:
-        if _pos_in_any_span(pos, td_spans):
-            pos += 1
-            continue
-        if _at_instance_scan_anchor(body, pos):
-            hit = _try_parse_module_instantiation_span(body, pos, self_mod)
-            if hit:
-                spans.append(hit)
-                pos = hit.end
-                continue
-        pos += 1
-    out = body
-    for sp in reversed(spans):
+    pieces: list[str] = []
+    last = 0
+    for _, (sp, _) in iter_instance_details(body, self_mod):
         lo = sp.port_open + 1
         hi = sp.port_close_excl - 1
         if lo < hi:
-            out = out[:lo] + (" " * (hi - lo)) + out[hi:]
-    return out
+            pieces.extend((body[last:lo], " " * (hi - lo)))
+            last = hi
+    pieces.append(body[last:])
+    return "".join(pieces)
 
 
 def skeletonize_scanned_verilog_for_dependency_scan(text: str) -> str:
@@ -849,7 +860,8 @@ def _collect_refs_from_body(body: str, self_mod: str, refs: list[str]) -> None:
             refs.append(bh)
 
 
-def scan_verilog_body(text: str, semantic_text: str | None = None) -> VerilogSliceScan:
+def scan_verilog_body(text: str, semantic_text: str | None = None, *,
+                      semantic_result: tuple[list[str], list[str], dict[str, list[str]]] | None = None) -> VerilogSliceScan:
     """从已通过条件编译筛选且压缩过的文本中抽取模块名、实例与 include。
 
     对每个 ``module`` … ``endmodule`` 的体内文本分别做例化/bind 扫描（**栈配对**以支持同文件多模块与嵌套）；
@@ -861,7 +873,11 @@ def scan_verilog_body(text: str, semantic_text: str | None = None) -> VerilogSli
     defs: list[str] = []
     refs: list[str] = []
     symbols: dict[str, list[str]] = {}
-    semantic_defs, semantic_refs = semantic_dependencies(text if semantic_text is None else semantic_text, symbols)
+    if semantic_result is None:
+        semantic_defs, semantic_refs = semantic_dependencies(text if semantic_text is None else semantic_text, symbols)
+    else:
+        semantic_defs, semantic_refs, saved_symbols = semantic_result
+        symbols.update(saved_symbols)
     incs: list[str] = []
     stacked = _split_module_regions_by_stack(text)
     if stacked is not None:

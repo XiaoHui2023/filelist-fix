@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
+
+
+def nonnegative_seconds(value: str) -> float:
+    seconds = float(value)
+    if not math.isfinite(seconds) or seconds < 0:
+        raise argparse.ArgumentTypeError("seconds must be finite and nonnegative")
+    return seconds
 
 
 def flatten_append_groups(groups: list[list[str]] | None) -> list[str]:
@@ -108,4 +116,10 @@ def build_parser() -> argparse.ArgumentParser:
             "No relation to -l."
         ),
     )
+    p.add_argument("--parse-timeout", type=nonnegative_seconds, default=30.0, metavar="SECONDS",
+                   help="Per-source dependency extraction budget including includes (default: 30; 0 disables). Checked at stage boundaries and scanner checkpoints.")
+    p.add_argument("--slow-file-seconds", type=nonnegative_seconds, default=5.0, metavar="SECONDS",
+                   help="Warn while a source is still parsing (default: 5; 0 disables warning).")
+    p.add_argument("--parse-timings", type=Path, default=None, metavar="JSON",
+                   help="Write per-source stage timings, cache hits and failure details as JSON.")
     return p

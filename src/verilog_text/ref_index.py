@@ -2,23 +2,21 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from bisect import bisect_right
 from typing import Literal
 
 from verilog_text.scan import (
     _ENDMODULE,
     _MODULE_HEAD,
-    _at_instance_scan_anchor,
     _consume_toplevel_semicolon_statement,
     _is_primitive_gate_type,
     _module_body_spans_by_stack,
     _package_names_in_import_statement,
     _parse_bind_line,
-    _pos_in_any_span,
     _skip_sv_attribute_instances,
     _skip_ws_any,
     _split_package_regions_by_stack,
-    _typedef_declaration_spans,
-    _try_parse_module_instantiation_detail,
+    iter_instance_details,
 )
 
 RefKind = Literal["instance", "bind", "import"]
@@ -34,10 +32,6 @@ class ModuleRefSite:
     line_in_scan_input: int
     instance_name: str | None = None
     excerpt: str = ""
-
-
-def _line_number_at(text: str, index: int) -> int:
-    return text.count("\n", 0, index) + 1
 
 
 def _excerpt_at(text: str, index: int, *, limit: int = 160) -> str:
@@ -57,33 +51,22 @@ def _collect_instance_sites_in_body(
     body_start: int,
     parent_module: str,
     out: list[ModuleRefSite],
+    line_starts: list[int],
 ) -> None:
-    pos = 0
-    n = len(body)
-    td_spans = _typedef_declaration_spans(body)
-    while pos < n:
-        if _pos_in_any_span(pos, td_spans):
-            pos += 1
-            continue
-        if _at_instance_scan_anchor(body, pos):
-            hit = _try_parse_module_instantiation_detail(body, pos, parent_module)
-            if hit:
-                span, inst_name = hit
-                if not _is_primitive_gate_type(span.mod_type):
-                    abs_pos = body_start + _skip_ws_any(body, pos)
-                    out.append(
-                        ModuleRefSite(
-                            referenced_module=span.mod_type,
-                            parent_module=parent_module,
-                            kind="instance",
-                            instance_name=inst_name,
-                            line_in_scan_input=_line_number_at(text, abs_pos),
-                            excerpt=_excerpt_at(text, abs_pos),
-                        )
-                    )
-                pos = hit[0].end
-                continue
-        pos += 1
+    for pos, hit in iter_instance_details(body, parent_module):
+        span, inst_name = hit
+        if not _is_primitive_gate_type(span.mod_type):
+            abs_pos = body_start + _skip_ws_any(body, pos)
+            out.append(
+                ModuleRefSite(
+                    referenced_module=span.mod_type,
+                    parent_module=parent_module,
+                    kind="instance",
+                    instance_name=inst_name,
+                    line_in_scan_input=bisect_right(line_starts, abs_pos),
+                    excerpt=_excerpt_at(text, abs_pos),
+                )
+            )
 
 
 def _collect_import_sites_in_body(
@@ -92,6 +75,7 @@ def _collect_import_sites_in_body(
     body_start: int,
     parent_module: str,
     out: list[ModuleRefSite],
+    line_starts: list[int],
 ) -> None:
     i = _skip_ws_any(body, 0)
     while i < len(body):
@@ -117,7 +101,7 @@ def _collect_import_sites_in_body(
                     referenced_module=pkg,
                     parent_module=parent_module,
                     kind="import",
-                    line_in_scan_input=_line_number_at(text, abs_pos),
+                    line_in_scan_input=bisect_right(line_starts, abs_pos),
                     excerpt=_excerpt_at(text, abs_pos),
                 )
             )
@@ -143,12 +127,13 @@ def collect_module_ref_sites(text: str) -> list[ModuleRefSite]:
     """从与 ``scan_verilog_body`` 相同的 scan 输入文本收集可检索的引用位置。"""
 
     out: list[ModuleRefSite] = []
+    line_starts = [0, *(m.end() for m in re.finditer("\n", text))]
     stacked = _module_body_spans_by_stack(text)
     if stacked is not None:
         for name, body_start, body_end in stacked:
             body = text[body_start:body_end]
-            _collect_import_sites_in_body(text, body, body_start, name, out)
-            _collect_instance_sites_in_body(text, body, body_start, name, out)
+            _collect_import_sites_in_body(text, body, body_start, name, out, line_starts)
+            _collect_instance_sites_in_body(text, body, body_start, name, out, line_starts)
         pkg_search = 0
         for pname, pbody in _split_package_regions_by_stack(text):
             pkg_start = text.find(pbody, pkg_search)
@@ -156,8 +141,8 @@ def collect_module_ref_sites(text: str) -> list[ModuleRefSite]:
                 pkg_start = 0
             else:
                 pkg_search = pkg_start + len(pbody)
-            _collect_import_sites_in_body(text, pbody, pkg_start, pname, out)
-            _collect_instance_sites_in_body(text, pbody, pkg_start, pname, out)
+            _collect_import_sites_in_body(text, pbody, pkg_start, pname, out, line_starts)
+            _collect_instance_sites_in_body(text, pbody, pkg_start, pname, out, line_starts)
         _collect_bind_sites(text, out)
         return out
 
@@ -175,13 +160,13 @@ def collect_module_ref_sites(text: str) -> list[ModuleRefSite]:
         kbd = mh.end()
         body_start = kbd + 1 if kbd < len(text) and text[kbd] == "\n" else kbd
         body = text[body_start : em.start()]
-        _collect_import_sites_in_body(text, body, body_start, name, out)
-        _collect_instance_sites_in_body(text, body, body_start, name, out)
+        _collect_import_sites_in_body(text, body, body_start, name, out, line_starts)
+        _collect_instance_sites_in_body(text, body, body_start, name, out, line_starts)
         pos = em.end()
 
     if not found_module:
-        _collect_import_sites_in_body(text, text, 0, "", out)
-        _collect_instance_sites_in_body(text, text, 0, "", out)
+        _collect_import_sites_in_body(text, text, 0, "", out, line_starts)
+        _collect_instance_sites_in_body(text, text, 0, "", out, line_starts)
 
     pkg_search = 0
     for pname, pbody in _split_package_regions_by_stack(text):
@@ -190,8 +175,8 @@ def collect_module_ref_sites(text: str) -> list[ModuleRefSite]:
             pkg_start = 0
         else:
             pkg_search = pkg_start + len(pbody)
-        _collect_import_sites_in_body(text, pbody, pkg_start, pname, out)
-        _collect_instance_sites_in_body(text, pbody, pkg_start, pname, out)
+        _collect_import_sites_in_body(text, pbody, pkg_start, pname, out, line_starts)
+        _collect_instance_sites_in_body(text, pbody, pkg_start, pname, out, line_starts)
 
     _collect_bind_sites(text, out)
     return out

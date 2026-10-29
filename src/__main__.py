@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 from rich.console import Console
@@ -35,11 +36,23 @@ def _description_table_column(console: Console, bar_width: int) -> Column:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     sources = flatten_append_groups(args.sources)
     tops = flatten_append_groups(args.tops)
     preludes = flatten_append_groups(args.preludes)
     excludes = flatten_append_groups(args.excludes)
+    protected = {args.output.resolve(), *(Path(p).resolve() for p in sources + preludes)}
+    if args.save is not None:
+        protected.add(args.save.resolve())
+    if args.log_file is not None and args.log_file.resolve() in protected:
+        parser.error("--log must differ from output, cache and explicit input paths")
+    if args.parse_timings is not None:
+        if args.parse_timings.suffix.lower() != ".json":
+            parser.error("--parse-timings requires a .json path")
+        if args.parse_timings.resolve() in protected or (args.log_file is not None and
+                args.parse_timings.resolve() == args.log_file.resolve()):
+            parser.error("--parse-timings must differ from output, cache, log and explicit input paths")
     log = configure_cli_logging(args.log_file)
     dep_dbg = DependencyDebugDump(args.debug_dump) if args.debug_dump else None
     console = Console(stderr=True, color_system="truecolor")
@@ -73,6 +86,9 @@ def main(argv: list[str] | None = None) -> int:
             progress_task_id=tid,
             dependency_debug_dump=dep_dbg,
         )
+        ctx.parse_timeout = args.parse_timeout
+        ctx.slow_file_seconds = args.slow_file_seconds
+        ctx.parse_timings = []
         app = FilelistApplication(
             search_roots=[Path(s) for s in sources],
             top_modules=tops,
@@ -83,7 +99,13 @@ def main(argv: list[str] | None = None) -> int:
             exclude_paths=[Path(x) for x in excludes],
             ctx=ctx,
         )
-        rb = app.run()
+        try:
+            rb = app.run()
+        finally:
+            if args.parse_timings is not None:
+                args.parse_timings.parent.mkdir(parents=True, exist_ok=True)
+                args.parse_timings.write_text(json.dumps({"schema_version": 1, "files": ctx.parse_timings},
+                                                         ensure_ascii=False, indent=2), encoding="utf-8")
 
     if ctx.exit_code is not None:
         return ctx.exit_code

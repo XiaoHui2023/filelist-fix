@@ -32,6 +32,9 @@ from core.path_logical import logical_abs
 from core.path_exclude import path_is_excluded
 from core.rg_search import RgModuleSearch
 from core.source_flatten import extract_dependencies_from_file
+from core.parse_monitor import note_cache_timing
+from time import perf_counter
+from verilog_text.parse_budget import ParseTimeout
 from runtime.log_format import lines_block
 
 
@@ -326,6 +329,11 @@ class FilelistApplication:
         ctx = self._ctx
         try:
             return self._run_orchestration(ctx)
+        except ParseTimeout as exc:
+            ctx.logger.error("%s; previous filelist preserved", exc)
+            ctx.console.print(f"{exc}; previous filelist preserved", markup=False)
+            ctx.request_exit(2)
+            return None
         finally:
             ctx.fire(OnSessionEndAPI)
 
@@ -475,6 +483,7 @@ class FilelistApplication:
                     f"parse · {hit.name}",
                     in_flight=True,
                 )
+                cache_started = perf_counter()
                 self._save.set_context(st.defines, st.incdirs)
                 cached = self._save.get_valid(hit)
                 cache_hit = bool(cached)
@@ -486,6 +495,7 @@ class FilelistApplication:
                     self._restore_discovered_incdirs(
                         st, hit, [Path(p) for p in json.loads(cached.discovered_incdirs_json)],
                     )
+                    note_cache_timing(ctx, hit, perf_counter() - cache_started)
                 else:
                     if log is not None and log.isEnabledFor(logging.DEBUG):
                         log.debug("extract dependencies from %s", hit)
