@@ -113,6 +113,42 @@ def verify(executable: Path) -> dict:
         run(duplicate_args + ["--exclude", str(shadow)])
         assert "shadow" not in auto_output.read_text(encoding="utf-8")
         checked.append("duplicate_definition_and_exclusion")
+        combined = work / "resolution"
+        sources, library = combined / "rtl", combined / "lib"
+        sources.mkdir(parents=True)
+        library.mkdir()
+        (sources / "netlist.sv").write_text(
+            "module helper;\ninitial begin\n" + "  ;\n" * 600000 +
+            "end endmodule\nmodule resolution_top;\n"
+            "localparam int W = resolution_pkg::WIDTH;\n"
+            "lib_a #(.W(resolution_pkg::WIDTH)) u();\nendmodule\n", encoding="utf-8")
+        package = sources / "package_source.sv"
+        package.write_text("package resolution_pkg; parameter WIDTH=1; endpackage\n", encoding="utf-8")
+        (library / "lib_a.model").write_text("module lib_a #(parameter W=1);\nlib_b u();\nendmodule\n", encoding="utf-8")
+        lib_b = library / "lib_b.model"
+        lib_b.write_text("module lib_b; endmodule\n", encoding="utf-8")
+        prelude = combined / "pre.f"
+        prelude.write_text("-y lib\n+libext+.model\n", encoding="utf-8")
+        combined_output = combined / "out.f"
+        combined_args = ["-s", str(sources), "-t", "resolution_top", "-p", str(prelude),
+                         "-o", str(combined_output), "--save", str(combined / "cache.db")]
+        for mode in ["cold", "warm"]:
+            run(combined_args)
+            lines = combined_output.read_text(encoding="utf-8").splitlines()
+            assert lines.index("lib/lib_b.model") < lines.index("lib/lib_a.model") < lines.index("rtl/netlist.sv")
+            assert lines.index("rtl/package_source.sv") < lines.index("rtl/netlist.sv")
+            assert lines.count("rtl/netlist.sv") == 1
+        checked.append("large_compact_definition_scoped_package_library_cold_warm")
+        preserved = combined_output.read_bytes()
+        package.unlink()
+        assert 'Not found module "resolution_pkg"' in run(combined_args, 1).stderr
+        assert combined_output.read_bytes() == preserved
+        checked.append("missing_scoped_package_preserves_output")
+        package.write_text("package resolution_pkg; parameter WIDTH=1; endpackage\n", encoding="utf-8")
+        lib_b.unlink()
+        assert 'Not found module "lib_b"' in run(combined_args, 1).stderr
+        assert combined_output.read_bytes() == preserved
+        checked.append("missing_transitive_library_preserves_output")
     return {"executable": executable.name, "sha256": sha(executable), "features": checked,
             "seconds": round(time.monotonic() - started, 3), "independent_cwd": True,
             "empty_path": True, "source_imports_disabled": True}

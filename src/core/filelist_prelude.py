@@ -134,6 +134,9 @@ class PreludeOutcome:
     incdirs: list[Path] = field(default_factory=list)
     defines: dict[str, str] = field(default_factory=dict)
     entries: list[PreludeEntry] = field(default_factory=list)
+    library_dirs: list[Path] = field(default_factory=list)
+    library_extensions: list[str] = field(default_factory=lambda: [".v", ".sv"])
+    _libext_explicit: bool = field(default=False, repr=False)
 
     def add_source(self, path: Path, output_path: Path, absolute: bool) -> None:
         """Record each source once, retaining its first logical path and position."""
@@ -213,6 +216,19 @@ def _consume_one_filelist(
                     raise FileNotFoundError(f"-y 目录不存在: {ydir}（自 {path_log}）")
                 disp = format_listed_path(ydir, output_path, absolute=path_absolute)
                 outcome.head_lines.append(f"-y {disp}")
+                if ydir not in outcome.library_dirs:
+                    outcome.library_dirs.append(ydir)
+            continue
+
+        if s.startswith("+libext+"):
+            if not outcome._libext_explicit:
+                outcome.library_extensions.clear()
+                outcome._libext_explicit = True
+            for ext in s[len("+libext+"):].split("+"):
+                suffix = "." + ext.lstrip(".") if ext else ""
+                if suffix not in outcome.library_extensions:
+                    outcome.library_extensions.append(suffix)
+            outcome.head_lines.append(s)
             continue
 
         im = _INCDIR.match(s)

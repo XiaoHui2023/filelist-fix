@@ -50,7 +50,7 @@ def resolve_squeeze_for_dep_scan(cb: SqueezeForDependencyScanAPI) -> None:
 @ScanVerilogForDependenciesAPI.register
 def resolve_scan_verilog_for_deps(cb: ScanVerilogForDependenciesAPI) -> None:
     """Populate module/include scan fields from squeezed text."""
-    r = scan_verilog_body(cb.scanned_text)
+    r = scan_verilog_body(cb.scanned_text, cb.semantic_text)
     cb.defined_modules = r.defined_modules
     cb.referenced_modules = r.referenced_modules
     cb.include_paths = r.include_paths

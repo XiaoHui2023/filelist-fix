@@ -24,9 +24,11 @@ from core.archive_sqlite import FileParseArchive
 from core.bin_resolve import ToolBinaryLocator, normalize_search_roots
 from core.dep_order import prerequisite_edges, topo_prereq_first, schedule_prelude_dependencies
 from core.fd_search import FdModuleSearch
+from core.hdl_extensions import HD_SOURCE_EXTENSIONS
 from core.filelist_paths import format_incdir_line, format_listed_path
 from core.filelist_prelude import PreludeOutcome, load_prelude_files_with_signature
 from core.path_logical import logical_abs
+from core.path_exclude import path_is_excluded
 from core.rg_search import RgModuleSearch
 from core.source_flatten import extract_dependencies_from_file
 from runtime.log_format import lines_block
@@ -162,6 +164,8 @@ class FilelistApplication:
         self._path_absolute = path_style == "absolute"
         self._ctx = ctx
         self._save_path = save_path
+        self._library_dirs: list[Path] = []
+        self._library_extensions: list[str] = []
         self._tools = ModuleResolveTools(
             loc.resolve_fd(),
             loc.resolve_rg(),
@@ -176,7 +180,11 @@ class FilelistApplication:
         hint = self._save.get_module_hint(mod)
         if hint is not None:
             hp = logical_abs(hint)
-            if not hp.is_file():
+            source_allowed = any(hp == root or (root in hp.parents and hp.suffix.lstrip('.').lower() in HD_SOURCE_EXTENSIONS)
+                                 for root in self._search_roots)
+            # Library candidates are cheap exact-name probes. Recheck them so new
+            # duplicates, exclusions and extension changes cannot hide behind hints.
+            if not hp.is_file() or path_is_excluded(hp, self._exclude_paths) or not source_allowed:
                 self._save.delete_module_hint(mod)
             else:
                 rec = self._save.get_valid(hp)
@@ -189,6 +197,13 @@ class FilelistApplication:
                     self._save.invalidate_module_hints_for_stale_file(hp)
                     return hp
         hits = self._tools.find_all(mod, self._search_roots)
+        if not hits:
+            hits = list(dict.fromkeys(
+                logical_abs(directory / (mod + ext))
+                for directory in self._library_dirs for ext in self._library_extensions
+                if (directory / (mod + ext)).is_file()
+                and not path_is_excluded(directory / (mod + ext), self._exclude_paths)
+            ))
         if len(hits) > 1:
             ctx = self._ctx
             ctx.fire(
@@ -277,8 +292,10 @@ class FilelistApplication:
             )
         else:
             pre = PreludeOutcome()
+        self._library_dirs = pre.library_dirs
+        self._library_extensions = pre.library_extensions
         st = FilelistSessionState()
-        ctx.search_roots = self._search_roots
+        ctx.search_roots = list(dict.fromkeys([*self._search_roots, *self._library_dirs]))
         ctx.exclude_paths = self._exclude_paths
         ctx.session_state = st
         ctx.output_path = self._output

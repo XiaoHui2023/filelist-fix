@@ -342,6 +342,28 @@ def collect_package_imports(text: str) -> list[str]:
                    for name in _package_names_in_import_statement(m.group(1))})
 
 
+def semantic_dependencies(text: str) -> tuple[list[str], list[str]]:
+    """Read declarations and scoped references before lossy instance filtering."""
+    text = re.sub(r'"(?:\\.|[^"\\])*"|/\*.*?\*/|//[^\n]*',
+                  lambda m: re.sub(r'[^\r\n]', ' ', m.group()), text, flags=re.DOTALL)
+    definitions = re.findall(
+        r'\b(?:module|macromodule|primitive|package)\s+'
+        r'(?:(?:automatic|static)\s+)?([A-Za-z_]\w*)\b', text)
+    local_types = set(re.findall(r'\bclass\s+(?:(?:automatic|static)\s+)?([A-Za-z_]\w*)', text))
+    for lo, hi in _typedef_declaration_spans(text):
+        alias = re.search(r'\b([A-Za-z_]\w*)\s*(?:\[[^]]*\]\s*)*;$', text[lo:hi].rstrip())
+        if alias:
+            local_types.add(alias.group(1))
+    local_types.update(re.findall(r'\b(?:parameter|localparam)\s+type\s+([A-Za-z_]\w*)', text))
+    for statement in re.findall(r'\bimport\s+([^;]*);', text):
+        local_types.update(re.findall(r'::\s*([A-Za-z_]\w*)', statement))
+    scopes = re.findall(r'(?<![\w$:\\])([A-Za-z_]\w*)\s*::\s*(?:[A-Za-z_]\w*|\*)'
+                        r'(?:\s*::\s*(?:[A-Za-z_]\w*|\*))*', text)
+    packages = set(collect_package_imports(text))
+    packages.update(name for name in scopes if name not in local_types | {'local', 'super', 'this', 'std'})
+    return sorted(set(definitions)), sorted(packages - {'std'})
+
+
 def _collect_pkg_imports_from_module_or_package_header(body: str) -> list[str]:
     """解析 ``module``/``package`` 体首段：``import`` 声明（可跨行）直至 ``#(`` 或端口 ``(``。"""
     out: list[str] = []
@@ -816,7 +838,7 @@ def _collect_refs_from_body(body: str, self_mod: str, refs: list[str]) -> None:
             refs.append(bh)
 
 
-def scan_verilog_body(text: str) -> VerilogSliceScan:
+def scan_verilog_body(text: str, semantic_text: str | None = None) -> VerilogSliceScan:
     """从已通过条件编译筛选且压缩过的文本中抽取模块名、实例与 include。
 
     对每个 ``module`` … ``endmodule`` 的体内文本分别做例化/bind 扫描（**栈配对**以支持同文件多模块与嵌套）；
@@ -827,7 +849,8 @@ def scan_verilog_body(text: str) -> VerilogSliceScan:
     """
     defs: list[str] = []
     refs: list[str] = []
-    refs.extend(collect_package_imports(text))
+    semantic_defs, semantic_refs = semantic_dependencies(text if semantic_text is None else semantic_text)
+    refs.extend(semantic_refs)
     incs: list[str] = []
     stacked = _split_module_regions_by_stack(text)
     if stacked is not None:
@@ -880,9 +903,9 @@ def scan_verilog_body(text: str) -> VerilogSliceScan:
         _collect_refs_from_body(text, "", refs)
     prim_names = [m.group(1) for m in _PRIMITIVE_DEF_HEAD.finditer(text)]
     package_names = re.findall(r"\bpackage\s+(?:(?:automatic|static)\s+)?([A-Za-z_]\w*)\s*;", text)
-    defined = sorted(set(defs) | set(prim_names) | set(package_names))
+    defined = semantic_defs if semantic_text is not None else sorted(set(defs) | set(prim_names) | set(package_names))
     return VerilogSliceScan(
         defined_modules=defined,
-        referenced_modules=sorted(set(refs)),
+        referenced_modules=sorted(set(refs) - {'std'}),
         include_paths=sorted(set(incs)),
     )

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from verilog_text.scan import (
-    collect_package_imports,
+    semantic_dependencies,
     _consume_h_ws,
     _ENDMODULE,
     _MODULE_HEAD,
@@ -425,11 +425,14 @@ def squeeze_pipeline_for_dependency_scan(
     """
 
     a = strip_comments_preserve_strings(strip_protected_regions(src))
-    b = drop_alwaysish_blocks(a)
+    # Keep unit boundaries outside heuristic statement deletion.
+    b = drop_alwaysish_blocks(re.sub(r'\bendmodule\b', '\nendmodule\n', a))
+    b = re.sub(r'\b(?:extern|pure\s+virtual)\s+function\b[^;]*;', '', b)
+    b = re.sub(r'\bfunction\b.*?\bendfunction\b', '', b, flags=re.DOTALL)
     c = strip_decl_noise_lines(b)
     d = strip_module_port_regions(c)
     e = skeletonize_scanned_verilog_for_dependency_scan(d)
-    imports = collect_package_imports(a)
+    _, imports = semantic_dependencies(a)
     if imports:
         e += "\n" + "\n".join(f"import {name}::*;" for name in imports)
     return a, b, c, d, e

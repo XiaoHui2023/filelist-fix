@@ -27,7 +27,7 @@ class CachedFileRecord:
     discovered_incdirs_json: str = "[]"
 
 
-_ARCHIVE_SCHEMA_VERSION = "5"
+_ARCHIVE_SCHEMA_VERSION = "6"
 
 
 class FileParseArchive:
