@@ -137,14 +137,16 @@ def test_timing_output_alias_rejected_before_old_list_is_touched(tmp_path):
     assert (tmp_path / "old.json").read_text() == "old list\n"
 
 
-def test_timeout_diagnostic_is_searchable_in_forced_color_narrow_console(tmp_path):
+@pytest.mark.parametrize("encoding", ["utf-8", "cp1252"])
+def test_timeout_diagnostic_is_searchable_in_forced_color_narrow_console(tmp_path, encoding):
     (tmp_path / "top.sv").write_text(stress.source_corpus("genvar"))
     output = tmp_path / "out.f"
     output.write_text("old\n")
     cp = subprocess.run([sys.executable, str(ROOT / "src"), "-s", str(tmp_path), "-t", "top",
                          "-o", str(output), "--parse-timeout", "0.000000001"],
-                        capture_output=True, text=True, encoding="utf-8", timeout=10,
-                        env={**os.environ, "FORCE_COLOR": "1", "COLUMNS": "32"})
+                        capture_output=True, text=True, encoding=encoding, timeout=10,
+                        env={**os.environ, "FORCE_COLOR": "1", "COLUMNS": "32",
+                             "PYTHONIOENCODING": encoding})
     assert cp.returncode == 2
     assert "stage=preprocess" in cp.stderr and str(tmp_path / "top.sv") in cp.stderr
     assert "previous filelist preserved" in cp.stderr
