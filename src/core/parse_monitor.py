@@ -44,7 +44,7 @@ def monitor_source(path: Any, ctx: Any | None):
             log.warning(message)
         console = getattr(ctx, "console", None)
         if console is not None:
-            console.print(message, markup=False)
+            console.print(message, markup=False, highlight=False, soft_wrap=True)
 
     timer = Timer(slow, warn) if ctx is not None and slow > 0 else None
     if timer is not None:

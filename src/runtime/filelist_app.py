@@ -331,7 +331,8 @@ class FilelistApplication:
             return self._run_orchestration(ctx)
         except ParseTimeout as exc:
             ctx.logger.error("%s; previous filelist preserved", exc)
-            ctx.console.print(f"{exc}; previous filelist preserved", markup=False)
+            ctx.console.print(f"{exc}; previous filelist preserved", markup=False,
+                              highlight=False, soft_wrap=True)
             ctx.request_exit(2)
             return None
         finally:
