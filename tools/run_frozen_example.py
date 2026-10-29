@@ -154,8 +154,8 @@ def verify(executable: Path) -> dict:
         macro = work / "macro-order"
         macro.mkdir()
         macro_parent = macro / "top.sv"
-        macro_parent.write_text('`define WIDTH 8\nmodule macro_top;\nchild u();\n'
-            'initial begin p::f(); end\nendmodule\n', encoding="utf-8")
+        macro_parent.write_text('`define WIDTH 8\nmodule macro_top; initial p::f();\n'
+            'child u();\nendmodule\n', encoding="utf-8")
         (macro / "p.sv").write_text('package p; function void f(); endfunction endpackage\n', encoding="utf-8")
         (macro / "child.sv").write_text('module child;\nwire [`WIDTH-1:0] value;\nendmodule\n', encoding="utf-8")
         macro_output = macro / "out.f"

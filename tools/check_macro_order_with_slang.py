@@ -18,7 +18,7 @@ def verify(oracle: Path) -> dict:
         work = Path(temp)
         parent = work / 'top.sv'
         parent.write_text('`define WIDTH 8\nclass C; static function void g(); endfunction endclass\n'
-            'module top;\nchild u();\ninitial begin p::f(); C::g(); end\nendmodule\n')
+            'module top; initial begin p::f(); C::g(); end\nchild u();\nendmodule\n')
         (work / 'p.sv').write_text('package p; function void f(); endfunction endpackage\n')
         (work / 'child.sv').write_text('module child;\nwire [`WIDTH-1:0] value;\n'
             '`ifdef WIDTH\nleaf u();\n`endif\nendmodule\n')
