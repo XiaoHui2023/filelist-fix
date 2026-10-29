@@ -151,6 +151,28 @@ def verify(executable: Path) -> dict:
         assert 'Not found module "lib_b"' in run(combined_args, 1).stderr
         assert combined_output.read_bytes() == preserved
         checked.append("missing_transitive_library_preserves_output")
+        macro = work / "macro-order"
+        macro.mkdir()
+        macro_parent = macro / "top.sv"
+        macro_parent.write_text('`define WIDTH 8\nmodule macro_top;\nchild u();\n'
+            'initial begin p::f(); end\nendmodule\n', encoding="utf-8")
+        (macro / "p.sv").write_text('package p; function void f(); endfunction endpackage\n', encoding="utf-8")
+        (macro / "child.sv").write_text('module child;\nwire [`WIDTH-1:0] value;\nendmodule\n', encoding="utf-8")
+        macro_output = macro / "out.f"
+        macro_args = ["-s", str(macro), "-t", "macro_top", "-p", str(macro_parent),
+                      "-o", str(macro_output), "--save", str(macro / "cache.db")]
+        for mode in ["cold", "warm"]:
+            run(macro_args)
+            lines = macro_output.read_text(encoding="utf-8").splitlines()
+            assert lines.index("p.sv") < lines.index("top.sv") < lines.index("child.sv")
+            assert not any(Path(line).name == "f.sv" for line in lines)
+        checked.append("macro_parent_before_child_scoped_call_cold_warm")
+        macro_parent.write_text('`define WIDTH 8\nmodule macro_top;\nimport p::*;\nendmodule\n', encoding="utf-8")
+        (macro / "p.sv").write_text('package p;\nlocalparam int W=`WIDTH;\nendpackage\n', encoding="utf-8")
+        preserved = macro_output.read_bytes()
+        assert "WIDTH" in run(macro_args, 1).stderr
+        assert macro_output.read_bytes() == preserved
+        checked.append("macro_package_cycle_preserves_output")
     return {"executable": executable.name, "sha256": sha(executable), "features": checked,
             "seconds": round(time.monotonic() - started, 3), "independent_cwd": True,
             "empty_path": True, "source_imports_disabled": True}

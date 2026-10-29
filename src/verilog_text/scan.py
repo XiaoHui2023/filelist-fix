@@ -356,6 +356,7 @@ def semantic_dependencies(text: str, symbols: dict[str, list[str]] | None = None
             local_types.add(alias.group(1))
     local_types.update(re.findall(r'\b(?:parameter|localparam)\s+type\s+([A-Za-z_]\w*)', text))
     if symbols is not None:
+        symbols['package_definitions'] = re.findall(r'\bpackage\s+(?:(?:automatic|static)\s+)?([A-Za-z_]\w*)\b', text)
         symbols['declared_types'] = sorted(local_types)
         symbols['package_imports'] = collect_package_imports(text)
     for statement in re.findall(r'\bimport\s+([^;]*);', text):
@@ -547,6 +548,11 @@ def _try_parse_module_instantiation_detail(
     """从 ``pos`` 起解析例化；返回 (跨度, 实例名或 None 表示匿名)。"""
     n = len(s)
     i = _skip_ws_any(s, pos)
+    previous = i - 1
+    while previous >= 0 and s[previous].isspace():
+        previous -= 1
+    if previous > 0 and s[previous - 1:previous + 1] == '::':
+        return None
     m = _ID_HEAD.match(s, i)
     if not m:
         return None

@@ -22,7 +22,8 @@ from api.events.filelist_build import (
 from api.events.progress import OnProgressAPI
 from core.archive_sqlite import FileParseArchive
 from core.bin_resolve import ToolBinaryLocator, normalize_search_roots
-from core.dep_order import prerequisite_edges, topo_prereq_first, schedule_prelude_dependencies
+from core.dep_order import (add_macro_prerequisites, prerequisite_edges, topo_prereq_first,
+                            schedule_prelude_dependencies, validate_macro_schedule, prioritize_macro_order)
 from core.fd_search import FdModuleSearch
 from core.hdl_extensions import HD_SOURCE_EXTENSIONS
 from core.filelist_paths import format_incdir_line, format_listed_path
@@ -65,6 +66,8 @@ class FilelistSessionState:
     file_symbols: dict[Path, dict[str, list[str]]] = field(default_factory=dict)
     scope_resolution_dirty: bool = False
     satisfied_type_scopes: set[str] = field(default_factory=set)
+    macro_origins: dict[str, Path | None] = field(default_factory=dict)
+    file_macro_bindings: dict[Path, dict[str, Path | None]] = field(default_factory=dict)
     parsed_resolved: set[Path] = field(default_factory=set)
     defines: dict[str, str] = field(default_factory=dict)
     incdirs: list[Path] = field(default_factory=list)
@@ -92,6 +95,25 @@ class FilelistSessionState:
 
     def note_symbols(self, path: Path, symbols: dict[str, list[str]]) -> None:
         self.file_symbols[path] = symbols
+        self.file_macro_bindings[path] = {name: self.macro_origins[name]
+                                          for name in symbols.get('macro_uses', []) if name in self.macro_origins}
+        for event in symbols.get('macro_events', []):
+            action, _, name = event.partition(' ')
+            if action == 'define':
+                self.macro_origins[name] = path
+            elif action == 'undef':
+                self.macro_origins.pop(name, None)
+            elif action == 'clear':
+                self.macro_origins.clear()
+        for event in symbols.get('macro_value_events', []):
+            action, _, payload = event.partition(' ')
+            name, _, value = payload.partition('=')
+            if action == 'define':
+                self.defines[name] = value
+            elif action == 'undef':
+                self.defines.pop(name, None)
+            elif action == 'clear':
+                self.defines.clear()
         if symbols.get('declared_types') or symbols.get('package_imports'):
             self.scope_resolution_dirty = True
 
@@ -330,6 +352,7 @@ class FilelistApplication:
         for entry in pre.entries:
             if entry.kind == "define":
                 st.defines[entry.name] = entry.value
+                st.macro_origins[entry.name] = None
             elif entry.kind == "incdir":
                 st.incdirs.append(entry.path)
             else:
@@ -452,6 +475,7 @@ class FilelistApplication:
                     f"parse · {hit.name}",
                     in_flight=True,
                 )
+                self._save.set_context(st.defines, st.incdirs)
                 cached = self._save.get_valid(hit)
                 cache_hit = bool(cached)
                 if cached:
@@ -540,13 +564,29 @@ class FilelistApplication:
             return rb
 
         premap = prerequisite_edges(st.file_refs, st.module_to_file)
-        nodes = set(st.file_refs.keys()) | {x for ss in premap.values() for x in ss}
+        macro_constraints: set[str] = set()
         try:
+            topo_prereq_first(premap, premap)
+            macro_edges: set[tuple[Path, Path]] = set()
+            macro_constraints = add_macro_prerequisites(premap, st.file_symbols, st.file_macro_bindings, macro_edges)
+            prioritize_macro_order(premap, st.file_symbols, macro_edges, prelude_sources)
+            nodes = set(st.file_refs.keys()) | {x for ss in premap.values() for x in ss}
             before, ordered = schedule_prelude_dependencies(
                 premap, topo_prereq_first(premap, nodes), prelude_sources,
             )
+            defines_at = {entry.line_index: entry.name for entry in pre.entries if entry.kind == 'define'}
+            timeline: list[Path | tuple[str, str]] = []
+            for index in range(len(pre.head_lines)):
+                timeline.extend(before.get(index, []))
+                if index in defines_at:
+                    timeline.append(('define', defines_at[index]))
+                if index in prelude_sources:
+                    timeline.append(prelude_sources[index])
+            timeline.extend(ordered)
+            validate_macro_schedule(st.file_symbols, timeline)
         except ValueError as error:
-            ctx.fire(OnBuildOrderInvalidAPI, message=str(error))
+            prefix = f'Macro order constraints {sorted(macro_constraints)}: ' if macro_constraints else ''
+            ctx.fire(OnBuildOrderInvalidAPI, message=prefix + str(error))
             return None
         rb = ResolvedBuild(head_lines=list(pre.head_lines), ordered_paths=ordered, state=st,
                            prelude_sources=prelude_sources, prelude_dependencies=before)

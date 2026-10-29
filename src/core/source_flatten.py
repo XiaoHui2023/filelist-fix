@@ -220,6 +220,7 @@ def extract_dependencies_from_file(
         r = ctx.fire(ScanVerilogForDependenciesAPI, scanned_text=squ, semantic_text=flat)
         if output_symbols is not None:
             output_symbols.update(r.symbols)
+            output_symbols.update(pre.macro_symbols())
         if dbg is not None:
             dbg.write_text(
                 path,
@@ -237,4 +238,5 @@ def extract_dependencies_from_file(
     scan = scan_verilog_body(squ, flat)
     if output_symbols is not None:
         output_symbols.update(scan.symbols)
+        output_symbols.update(pre.macro_symbols())
     return scan.defined_modules, scan.referenced_modules, scan.include_paths

@@ -28,7 +28,7 @@ class CachedFileRecord:
     symbols_json: str = "{}"
 
 
-_ARCHIVE_SCHEMA_VERSION = "7"
+_ARCHIVE_SCHEMA_VERSION = "8"
 
 
 class FileParseArchive:
@@ -145,6 +145,11 @@ class FileParseArchive:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+
+    def set_context(self, defines: dict[str, str], incdirs: list[Path]) -> None:
+        """Bind lookup/write to the macro environment immediately before this file."""
+        self._defines = dict(defines)
+        self._incdirs = list(incdirs)
 
     def _row_to_record(self, row: tuple[object, ...]) -> CachedFileRecord:
         return CachedFileRecord(
