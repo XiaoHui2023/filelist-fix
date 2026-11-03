@@ -166,3 +166,18 @@ def test_filename_index_preserves_fd_unicode_case_matching(tmp_path):
         cp=subprocess.run([executable,'--type','f',pattern,str(tmp_path)],capture_output=True,text=True,encoding='utf-8',timeout=10)
         assert cp.returncode in (0,1)
         assert {p.resolve() for p in search.search_all(name,[tmp_path])}=={Path(p).resolve() for p in cp.stdout.splitlines()}
+
+
+def test_explicit_source_file_retains_content_fallback_without_false_duplicate(tmp_path):
+    rtl=tmp_path/'rtl';rtl.mkdir()
+    (rtl/'top.sv').write_text('module top;\nfoo u();\nendmodule\n')
+    (rtl/'foo.sv').write_text('module foo; endmodule\n')
+    extra=tmp_path/'foo.sv';extra.write_text('module bar; endmodule\n')
+    output=tmp_path/'out.f'
+    args=[sys.executable,str(ROOT/'src'),'-s',str(rtl),str(extra),'-t','top','-o',str(output)]
+    cp=subprocess.run(args,capture_output=True,text=True,timeout=15)
+    assert cp.returncode==0,cp.stderr
+    assert output.read_text().splitlines()==['rtl/foo.sv','rtl/top.sv']
+    cp=subprocess.run([sys.executable,str(ROOT/'src'),'-s',str(extra),'-t','bar','-o',str(output)],
+                      capture_output=True,text=True,timeout=15)
+    assert cp.returncode==0 and output.read_text().splitlines()==['foo.sv'],cp.stderr

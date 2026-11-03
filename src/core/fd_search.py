@@ -20,7 +20,9 @@ class FdModuleSearch:
         if root not in self._indexes:
             index: dict[str, list[Path]] = {}
             if root.is_file():
-                paths = [root]
+                # fd searches directories. Explicit source files retain the
+                # content-search fallback instead of becoming filename hits.
+                paths = []
             else:
                 result = run_search([self._fd, "--type", "f", "--print0", ".", str(root)])
                 paths = [Path(value) for value in result.stdout.split("\0") if value]

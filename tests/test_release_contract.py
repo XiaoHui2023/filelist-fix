@@ -65,4 +65,3 @@ def test_product_sources_use_minimum_grammar_and_parenthesized_starred_keys():
     check('value[(key, *tail)]')
     for source in (TOOLS.parent / 'src').rglob('*.py'):
         check(source.read_text(encoding='utf-8'))
-
