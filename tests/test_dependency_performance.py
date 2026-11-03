@@ -37,23 +37,35 @@ def test_large_legal_corpus_public_cli(tmp_path, kind):
 @pytest.mark.parametrize("debug", [False, True])
 def test_stage_timing_and_warm_cache(tmp_path, debug):
     (tmp_path / "top.sv").write_text(stress.source_corpus("genvar"))
-    timing = tmp_path / "timing.json"
-    args = ["--parse-timings", timing, "--save", tmp_path / "cache.db", "-l", tmp_path / "run.log"]
+    log = tmp_path / "run.log"
+    args = ["--save", tmp_path / "cache.db", "-l", log]
     if debug:
         args += ["--debug-dump", tmp_path / "debug"]
     run(tmp_path, *args)
-    files = json.loads(timing.read_text())["files"]
-    assert len(files) == 1 and not files[0]["cache_hit"]
-    stages = [s["stage"] for s in files[0]["stages"]]
-    for required in ["read", "join", "mask", "preprocess", "semantic", "squeeze", "instances",
-                     "squeeze.comments", "squeeze.declarations", "squeeze.ports"]:
-        assert stages.count(required) == 1
-    assert all(s["elapsed_seconds"] >= 0 and s["status"] == "ok" for s in files[0]["stages"])
-    assert "parse stage=semantic status=ok elapsed=" in (tmp_path / "run.log").read_text()
+    text = log.read_text()
+    for stage in ["read", "join", "mask", "preprocess", "semantic", "squeeze", "instances",
+                  "squeeze.comments", "squeeze.declarations", "squeeze.ports"]:
+        assert text.count(f"parse stage={stage} status=ok elapsed=") == 1
     run(tmp_path, *args)
-    files = json.loads(timing.read_text())["files"]
-    assert len(files) == 1 and files[0]["cache_hit"]
-    assert [s["stage"] for s in files[0]["stages"]] == ["cache"]
+    text = log.read_text()
+    assert text.count("parse stage=cache status=ok") == 1
+    assert "parse stage=semantic" not in text
+
+
+def short_deadline_command(work, *args):
+    # Fault injection for the internal deadline; no test-only product CLI flag.
+    script = f"""import sys,runpy
+sys.path.insert(0, {str(ROOT / 'src')!r})
+import core.parse_monitor as monitor
+Original = monitor.ParseBudget
+class ShortBudget(Original):
+ def __init__(self, path, seconds, observer):
+  super().__init__(path, 0.000000001, observer)
+monitor.ParseBudget = ShortBudget
+sys.argv = {[str(ROOT / 'src'), '-s', str(work), '-t', 'top', '-o', str(work / 'out.f'), *map(str,args)]!r}
+runpy.run_path({str(ROOT / 'src/__main__.py')!r}, run_name='__main__')
+"""
+    return [sys.executable, '-c', script]
 
 
 @pytest.mark.parametrize("prelude", [False, True])
@@ -62,31 +74,31 @@ def test_deadline_preserves_old_list_and_records_failure(tmp_path, prelude):
     source.write_text(stress.source_corpus("genvar"))
     output = tmp_path / "out.f"
     output.write_bytes(b"old valid list\r\n")
-    timing = tmp_path / "timing.json"
-    args = ["--parse-timeout", "0.000000001", "--parse-timings", timing]
-    if prelude:
-        args += ["-p", source]
-    cp = run(tmp_path, *args, expected=2)
-    assert "timeout" in cp.stderr and "stage=" in cp.stderr and "top.sv" in cp.stderr
+    log = tmp_path / "run.log"
+    args = ['-l', log, *(['-p', source] if prelude else [])]
+    cp = subprocess.run(short_deadline_command(tmp_path, *args), capture_output=True, text=True, timeout=10)
+    assert cp.returncode == 2 and "timeout" in cp.stderr and "stage=" in cp.stderr
     assert "previous filelist preserved" in cp.stderr
     assert output.read_bytes() == b"old valid list\r\n"
     assert not list(tmp_path.glob(".filelist-*"))
-    report = json.loads(timing.read_text())["files"][0]
-    assert report["status"] == "failed" and "budget=" in report["error"]
+    assert "parse total status=failed" in log.read_text()
 
 
-def test_live_slow_warning_and_disabled_deadline(tmp_path):
+def test_progress_identifies_current_source_without_slow_warning(tmp_path):
     (tmp_path / "top.sv").write_text(stress.source_corpus("typedef"))
-    cp = run(tmp_path, "--parse-timeout", "0", "--slow-file-seconds", "0.000001")
-    assert "slow dependency extraction" in cp.stderr and "stage=" in cp.stderr
+    cp = run(tmp_path, '-l', tmp_path / 'run.log')
+    assert "slow dependency extraction" not in cp.stderr
+    text = (tmp_path / 'run.log').read_text(encoding='utf-8')
+    assert text.index("parse · top.sv") < text.index("parse stage=read")
     assert (tmp_path / "out.f").read_text().splitlines() == ["top.sv"]
 
 
-@pytest.mark.parametrize("value", ["-1", "nan", "inf"])
-def test_invalid_timeout_rejected_without_output_change(tmp_path, value):
+@pytest.mark.parametrize("flag", ["--parse-timeout", "--slow-file-seconds", "--parse-timings"])
+def test_removed_tuning_flags_rejected_without_output_change(tmp_path, flag):
     (tmp_path / "top.sv").write_text("module top; endmodule\n")
     (tmp_path / "out.f").write_text("old\n")
-    run(tmp_path, "--parse-timeout", value, expected=2)
+    cp = run(tmp_path, flag, '1', expected=2)
+    assert 'unrecognized arguments' in cp.stderr
     assert (tmp_path / "out.f").read_text() == "old\n"
 
 
@@ -119,22 +131,12 @@ def test_failed_atomic_replace_preserves_existing_bytes(tmp_path, monkeypatch):
 def test_include_paths_are_identified_in_phase_timings(tmp_path):
     (tmp_path / "top.sv").write_text('`include "body.svh"\nmodule top; endmodule\n')
     (tmp_path / "body.svh").write_text("`define WIDTH 8\n")
-    timing = tmp_path / "timing.json"
-    run(tmp_path, "--parse-timings", timing)
-    records = json.loads(timing.read_text())["files"]
-    assert len(records) == 1
-    reads = [s for s in records[0]["stages"] if s["stage"] == "read"]
-    assert {Path(s["path"]).name for s in reads} == {"top.sv", "body.svh"}
-
-
-def test_timing_output_alias_rejected_before_old_list_is_touched(tmp_path):
-    (tmp_path / "top.sv").write_text("module top; endmodule\n")
-    (tmp_path / "old.json").write_text("old list\n")
-    cp = subprocess.run([sys.executable, str(ROOT / "src"), "-s", str(tmp_path), "-t", "top",
-                         "-o", str(tmp_path / "old.json"), "--parse-timings", str(tmp_path / "old.json")],
-                        capture_output=True, text=True, timeout=10)
-    assert cp.returncode == 2 and "must differ" in cp.stderr
-    assert (tmp_path / "old.json").read_text() == "old list\n"
+    log = tmp_path / 'run.log'
+    run(tmp_path, '-l', log)
+    lines = log.read_text().splitlines()
+    reads = [line for line in lines if 'parse stage=read status=ok' in line]
+    assert len(reads) == 2
+    assert any('top.sv' in line for line in reads) and any('body.svh' in line for line in reads)
 
 
 @pytest.mark.parametrize("encoding", ["utf-8", "cp1252"])
@@ -142,8 +144,7 @@ def test_timeout_diagnostic_is_searchable_in_forced_color_narrow_console(tmp_pat
     (tmp_path / "top.sv").write_text(stress.source_corpus("genvar"))
     output = tmp_path / "out.f"
     output.write_text("old\n")
-    cp = subprocess.run([sys.executable, str(ROOT / "src"), "-s", str(tmp_path), "-t", "top",
-                         "-o", str(output), "--parse-timeout", "0.000000001"],
+    cp = subprocess.run(short_deadline_command(tmp_path),
                         capture_output=True, text=True, encoding=encoding, timeout=10,
                         env={**os.environ, "FORCE_COLOR": "1", "COLUMNS": "32",
                              "PYTHONIOENCODING": encoding})

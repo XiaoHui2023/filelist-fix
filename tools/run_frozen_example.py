@@ -183,27 +183,27 @@ def verify(executable: Path) -> dict:
         (stress_dir / "child.sv").write_text("module child(input a); endmodule\n")
         (stress_dir / "p.sv").write_text("package p; parameter int VALUE=1; endpackage\n")
         stress_output = stress_dir / "out.f"
-        timing = stress_dir / "timing.json"
+        timing = stress_dir / "run.log"
         stress_samples = []
         for count in (4038, 40380):
             for kind in KINDS:
                 (stress_dir / "top.sv").write_text(source_corpus(kind, count))
                 args = ["-s", str(stress_dir), "-t", "top", "-o", str(stress_output),
-                        "--parse-timings", str(timing)]
+                        "-l", str(timing)]
                 then = time.monotonic()
                 cp = run(args)
                 elapsed = time.monotonic() - then
                 expected = (["child.sv", "top.sv"] if kind == "instances" else
                             ["child.sv", "p.sv", "top.sv"] if kind == "conditional" else ["top.sv"])
                 check_result(cp.returncode, elapsed, 10, stress_output.read_text().splitlines(), expected)
-                assert all(f["status"] == "ok" for f in json.loads(timing.read_text())["files"])
+                assert "parse total status=ok" in timing.read_text(encoding="utf-8")
                 stress_samples.append({"kind": kind, "count": count, "seconds": elapsed})
         checked.append("six_large_corpora_4040_and_40382_lines_under_10s")
         preserved = stress_output.read_bytes()
-        run([*args, "--parse-timeout", "0.000000001"], 2)
+        run([*args, "--slow-file-seconds", "1"], 2)
         assert stress_output.read_bytes() == preserved
-        assert json.loads(timing.read_text())["files"][0]["status"] == "failed"
-        checked.append("parse_timeout_preserves_old_list_and_failure_timing")
+        assert "slow dependency extraction" not in cp.stderr
+        checked.append("simple_cli_rejects_removed_tuning_without_overwriting_list")
         conditions = work / 'macro_conditions'
         conditions.mkdir()
         (conditions / 'z_probe.sv').write_text('module probe;\n`ifndef FLAG\nunset_leaf u();\n`else\nset_leaf u();\n`endif\nendmodule\n')
@@ -237,6 +237,24 @@ def verify(executable: Path) -> dict:
         run(['-s', str(conditions), '-t', 'probe', '-o', str(condition_out)], 1)
         assert condition_out.read_bytes() == preserved
         checked.append('package_conditional_state_conflict_preserves_output')
+        wide = work / 'wide'; wide.mkdir()
+        names = [f'leaf{i}' for i in range(130)]
+        (wide / 'top.sv').write_text('module top;\n' + ''.join(f'{name} u{i}();\n' for i, name in enumerate(names)) + 'endmodule\n')
+        for name in names:
+            (wide / ('unit_' + name + '.sv')).write_text(f'module {name}; endmodule\n')
+        wide_output, wide_log = wide / 'out.f', wide / 'run.log'
+        args = ['-s', str(wide), '-t', 'top', '-o', str(wide_output), '-l', str(wide_log), '--save', str(wide / 'cache.db')]
+        for warm in [False, True]:
+            run(args)
+            lines = wide_output.read_text().splitlines()
+            assert len(lines) == 131 and set(lines) == {'top.sv', *('unit_' + name + '.sv' for name in names)}
+            text = wide_log.read_text(encoding='utf-8')
+            tools = [Path(line.split('locate tool=')[1].split(' status=')[0]).stem
+                     for line in text.splitlines() if 'locate tool=' in line]
+            assert tools.count('fd') == (0 if warm else 1)
+            assert tools.count('rg') == (0 if warm else 3)
+            assert 'slow dependency extraction' not in text
+        checked.append('wide_closure_batched_location_cold_warm_exact_files')
     return {"executable": executable.name, "sha256": sha(executable), "features": checked,
             "seconds": round(time.monotonic() - started, 3), "independent_cwd": True,
             "empty_path": True, "source_imports_disabled": True, "stress_samples": stress_samples}

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from time import perf_counter
-from threading import Timer
 from typing import Any
 
 from verilog_text.parse_budget import ParseBudget, active_budget
@@ -21,7 +20,7 @@ def note_cache_timing(ctx: Any, path: Any, elapsed: float) -> None:
 
 @contextmanager
 def monitor_source(path: Any, ctx: Any | None):
-    """Record phase latency and warn once while a source is still being parsed."""
+    """Record phase latency; the progress line already identifies the active file."""
     record: dict[str, Any] = {"path": str(path), "cache_hit": False, "stages": []}
     log = getattr(ctx, "logger", None)
 
@@ -35,21 +34,6 @@ def monitor_source(path: Any, ctx: Any | None):
     seconds = getattr(ctx, "parse_timeout", 30.0)
     budget = ParseBudget(str(path), seconds, observe)
     token = active_budget.set(budget)
-    slow = getattr(ctx, "slow_file_seconds", 5.0)
-
-    def warn() -> None:
-        message = (f"slow dependency extraction: {path}; stage={budget.current}; "
-                   f"elapsed={perf_counter()-budget.started:.3f}s; budget={seconds:g}s")
-        if log is not None:
-            log.warning(message)
-        console = getattr(ctx, "console", None)
-        if console is not None:
-            console.print(message, markup=False, highlight=False, soft_wrap=True)
-
-    timer = Timer(slow, warn) if ctx is not None and slow > 0 else None
-    if timer is not None:
-        timer.daemon = True
-        timer.start()
     try:
         yield
         budget.check()
@@ -58,9 +42,6 @@ def monitor_source(path: Any, ctx: Any | None):
         record.update(status="failed", error=str(exc))
         raise
     finally:
-        if timer is not None:
-            timer.cancel()
-            timer.join()
         record["elapsed_seconds"] = perf_counter() - budget.started
         active_budget.reset(token)
         if ctx is not None:

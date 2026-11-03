@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import deque
+from itertools import islice
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -31,6 +32,7 @@ from core.filelist_prelude import PreludeOutcome, load_prelude_files_with_signat
 from core.path_logical import logical_abs
 from core.path_exclude import path_is_excluded
 from core.rg_search import RgModuleSearch
+from core.search_process import SearchFailure
 from core.source_flatten import extract_dependencies_from_file
 from core.parse_monitor import note_cache_timing
 from time import perf_counter
@@ -151,6 +153,12 @@ class ModuleResolveTools:
         self._fd = FdModuleSearch(fd_exe)
         self._rg = RgModuleSearch(rg_exe)
         self._excludes = excludes or []
+        self.pending_names: list[str] = []
+
+    def reset(self) -> None:
+        self._fd._indexes.clear()
+        self._rg._results.clear()
+        self.pending_names.clear()
 
     def find_all(self, module: str, roots: list[Path]) -> list[Path]:
         fd_hits = self._fd.search_all(module, roots, self._excludes)
@@ -158,6 +166,11 @@ class ModuleResolveTools:
             return fd_hits
         if len(fd_hits) == 1:
             return fd_hits
+        if not self._rg.has_result(module, roots, self._excludes):
+            pending = [module, *self.pending_names]
+            pending = list(dict.fromkeys(name for name in pending
+                                       if not self._fd.search_all(name, roots, self._excludes)))
+            self._rg.search_many(pending, roots, self._excludes)
         return self._rg.search_all(module, roots, self._excludes)
 
     def fd_search_by_filename(
@@ -215,8 +228,16 @@ class FilelistApplication:
         hint = self._save.get_module_hint(mod)
         if hint is not None:
             hp = logical_abs(hint)
-            source_allowed = any(hp == root or (root in hp.parents and hp.suffix.lstrip('.').lower() in HD_SOURCE_EXTENSIONS)
-                                 for root in self._search_roots)
+            source_allowed = False
+            for root in self._search_roots:
+                resolved = hp.resolve()
+                anchor = root.resolve()
+                if resolved == anchor:
+                    hp, source_allowed = root, True
+                    break
+                if root.is_dir() and resolved.is_relative_to(anchor) and hp.suffix.lstrip('.').lower() in HD_SOURCE_EXTENSIONS:
+                    hp, source_allowed = root / resolved.relative_to(anchor), True
+                    break
             # Library candidates are cheap exact-name probes. Recheck them so new
             # duplicates, exclusions and extension changes cannot hide behind hints.
             if not hp.is_file() or path_is_excluded(hp, self._exclude_paths) or not source_allowed:
@@ -226,6 +247,9 @@ class FilelistApplication:
                 if rec is not None:
                     defs_chk = json.loads(rec.defined_modules)
                     if mod in defs_chk:
+                        log = getattr(self._ctx, 'logger', None)
+                        if log is not None:
+                            log.info('locate kind=hint module=%s source=%s', mod, hp)
                         return hp
                     self._save.delete_module_hint(mod)
                 else:
@@ -331,7 +355,7 @@ class FilelistApplication:
         ctx = self._ctx
         try:
             return self._run_orchestration(ctx)
-        except ParseTimeout as exc:
+        except (ParseTimeout, SearchFailure) as exc:
             ctx.logger.error("%s; previous filelist preserved", exc)
             ctx.console.print(f"{exc}; previous filelist preserved", markup=False,
                               highlight=False, soft_wrap=True)
@@ -341,6 +365,7 @@ class FilelistApplication:
             ctx.fire(OnSessionEndAPI)
 
     def _run_orchestration(self, ctx: Any) -> ResolvedBuild | None:
+        self._tools.reset()
         if self._prelude_paths:
             pre, _ = load_prelude_files_with_signature(
                 self._prelude_paths,
@@ -369,6 +394,8 @@ class FilelistApplication:
                 st.incdirs.append(entry.path)
             else:
                 hit = st.canonical_source_path(entry.path)
+                ctx.fire(OnProgressAPI, phase='', current=0, total=None,
+                         message=f'parse · {hit.name}')
                 before_incdirs = list(st.incdirs)
                 symbols: dict[str, list[str]] = {}
                 defs, refs, _ = extract_dependencies_from_file(
@@ -459,6 +486,9 @@ class FilelistApplication:
                 if log is not None and log.isEnabledFor(logging.DEBUG):
                     log.debug("search definition for module %r", mod)
 
+                self._save.set_context(st.defines, st.incdirs)
+                self._tools.pending_names = [name for name in islice(q, 63)
+                                             if name not in st.module_to_file and name not in st._unresolved_seen]
                 hit = self._locate_module_file(mod)
                 if getattr(ctx, "exit_code", None):
                     break
