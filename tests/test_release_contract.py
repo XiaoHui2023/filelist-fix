@@ -4,6 +4,7 @@ import importlib.util
 import hashlib
 import json
 from pathlib import Path
+import ast
 import sys
 import zipfile
 
@@ -50,3 +51,18 @@ def test_archive_without_product_design_docs_is_rejected(tmp_path):
             package.writestr(name, text)
     with pytest.raises(ValueError, match='documentation missing'):
         extract_checked(archive, tmp_path / 'out')
+def test_product_sources_use_minimum_grammar_and_parenthesized_starred_keys():
+    def check(text):
+        tree = ast.parse(text, feature_version=(3, 10))
+        # feature_version is best effort: 3.11's parser also accepts this newer
+        # subscript spelling when asked for 3.10 grammar. Guard the escaped case.
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Tuple):
+                if any(isinstance(item, ast.Starred) for item in node.slice.elts):
+                    assert ast.get_source_segment(text, node.slice).lstrip().startswith('(')
+    with pytest.raises(AssertionError):
+        check('value[key, *tail]')
+    check('value[(key, *tail)]')
+    for source in (TOOLS.parent / 'src').rglob('*.py'):
+        check(source.read_text(encoding='utf-8'))
+

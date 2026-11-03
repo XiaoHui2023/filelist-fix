@@ -68,7 +68,7 @@ class RgModuleSearch:
                         if pattern.search(text):
                             hits[name].setdefault(path.resolve(), path)
             for name in batch:
-                self._results[name, *scope] = sorted(hits[name].values(), key=lambda p: (len(p.parts), str(p)))
+                self._results[(name, *scope)] = sorted(hits[name].values(), key=lambda p: (len(p.parts), str(p)))
 
     def search_all(self, module_name: str, roots: list[Path], excludes: list[Path] | None = None) -> list[Path]:
         self.search_many([module_name], roots, excludes)
