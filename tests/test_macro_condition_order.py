@@ -157,3 +157,11 @@ def test_explicit_prelude_define_and_later_source_redefinition(tmp_path):
     lines = (tmp_path / 'out.f').read_text().splitlines()
     assert lines.index('z_probe.sv') < lines.index('a_defs.sv')
     assert 'set_leaf.sv' in lines and 'unset_leaf.sv' not in lines
+
+
+def test_repeated_header_macro_writers_keep_input_order(tmp_path):
+    (tmp_path / 'shared.svh').write_text('`define WIDTH 8\n')
+    (tmp_path / 'z_probe.sv').write_text('`include "shared.svh"\nmodule probe;\nreplica u();\nendmodule\n')
+    (tmp_path / 'a_replica.sv').write_text('`include "shared.svh"\nmodule replica;\nlocalparam int VALUE=`WIDTH;\nendmodule\n')
+    cli(tmp_path)
+    assert (tmp_path / 'out.f').read_text().splitlines() == ['z_probe.sv', 'a_replica.sv']

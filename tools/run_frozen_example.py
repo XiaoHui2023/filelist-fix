@@ -41,7 +41,11 @@ def verify(executable: Path) -> dict:
         actual = sorted(p.resolve().relative_to((example / "complex_rtl").resolve()).as_posix() for p in files)
         expected_files = json.loads((ROOT / "tests/data/complex_expected.json").read_text(encoding="utf-8"))
         assert actual == expected_files and len(set(files)) == len(files)
-        assert files[-1].name == "top_chip.v" and all(p.is_file() for p in files)
+        assert all(p.is_file() for p in files)
+        positions = {p.name: index for index, p in enumerate(files)}
+        # These files all write the macros in param_macro.vh. Preserve their
+        # input order; ordinary module references allow forward declarations.
+        assert positions['top_chip.v'] < positions['torture_bind.sv'] < positions['torture_hash_params.v']
         assert (work / "debug/module_ref_index.txt").is_file()
         assert (work / "run.log").stat().st_size > 0
         checked.append("full_complex_example_exact_20_files_and_debug")

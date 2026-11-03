@@ -92,6 +92,16 @@ def verify(oracle: Path) -> dict:
         code, result = compile_filelist(mutant)
         assert code == 0 and result['values']['probe'] == '16', result
         checks.append({'kind': 'wrong-value-mutant', 'wrong_value_detected': result['values']['probe'] != '8'})
+        (work / 'shared.svh').write_text('`define WIDTH 8\n')
+        (work / 'z_probe.sv').write_text('`include "shared.svh"\nmodule probe;\nreplica u();\nlocalparam int VALUE=`WIDTH;\nendmodule\n')
+        (work / 'a_replica.sv').write_text('`include "shared.svh"\nmodule replica; endmodule\n')
+        cp = subprocess.run([sys.executable, str(ROOT / 'src'), '-s', str(work), '-t', 'probe',
+                             '-o', str(out)], capture_output=True, text=True, timeout=15)
+        assert cp.returncode == 0, cp.stderr
+        assert out.read_text().splitlines() == ['z_probe.sv', 'a_replica.sv']
+        code, result = compile_filelist(out)
+        assert code == 0 and result['values']['probe'] == '8', result
+        checks.append({'kind': 'repeated-header-writers-parent-first', 'compiler': result})
     return {'checks': checks, 'source_sha': subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()}
 
 
