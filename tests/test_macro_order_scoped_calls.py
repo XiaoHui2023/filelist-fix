@@ -119,12 +119,12 @@ def test_prelude_redefinition_keeps_actual_prior_provider(tmp_path):
     assert (tmp_path / 'out.f').read_text().splitlines()[:3] == ['first.svh', 'middle.sv', 'last.svh']
 
 
-def test_sort_cannot_silently_change_conditional_environment(tmp_path):
+def test_sort_preserves_conditional_environment_by_ordering(tmp_path):
     (tmp_path / 'defs.sv').write_text('`define FLAG\nmodule defs; endmodule\n')
     (tmp_path / 'top.sv').write_text('module top;\n`ifdef FLAG\nwire x;\n`else\nwire y;\n`endif\nendmodule\n')
     cp = run_cli(tmp_path, '-t', 'top', 'defs')
-    assert cp.returncode != 0 and 'Macro FLAG' in cp.stderr
-    assert not (tmp_path / 'out.f').exists()
+    assert cp.returncode == 0, cp.stderr
+    assert (tmp_path / 'out.f').read_text().splitlines() == ['top.sv', 'defs.sv']
 
 
 def test_real_instance_survives_same_name_scoped_call(tmp_path):

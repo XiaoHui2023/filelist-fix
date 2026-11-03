@@ -136,6 +136,61 @@ def prioritize_macro_order(
         prereq[source].remove(dependency)
 
 
+def add_macro_state_prerequisites(
+    prereq: dict[Path, set[Path]], symbols: dict[Path, dict[str, list[str]]],
+    bindings: dict[Path, dict[str, Path | None]],
+    timeline: Iterable[Path | tuple[str, str]],
+    macro_edges: set[tuple[Path, Path]],
+) -> set[str]:
+    """Preserve observed input state using adjacent reads/writes of the same macro.
+
+    A condition is an observation, including absence, not a request for any
+    provider. A later write follows pending observations. Undefineall joins
+    the current frontier and starts a new epoch without scanning all names.
+    """
+    writers: dict[str, Path | None] = {}
+    readers: dict[str, set[Path]] = {}
+    frontier: set[Path] = set()
+    cleared_at: Path | None = None
+    constrained: set[str] = set()
+
+    def before(earlier: Path | None, later: Path, name: str) -> None:
+        if earlier is not None and earlier != later:
+            prereq.setdefault(later, set()).add(earlier)
+            macro_edges.add((later, earlier))
+            constrained.add(name)
+
+    for item in timeline:
+        if isinstance(item, tuple):
+            # Explicit prelude defines are already pinned at their input slot.
+            writers[item[1]] = None
+            readers.pop(item[1], None)
+            continue
+        info = symbols.get(item, {})
+        observed = set(info.get('macro_condition_defined', [])) | set(info.get('macro_condition_undefined', []))
+        observed.update(set(info.get('macro_uses', [])) & bindings.get(item, {}).keys())
+        for name in observed:
+            before(writers.get(name, cleared_at), item, name)
+            readers.setdefault(name, set()).add(item)
+            frontier.add(item)
+        for event in info.get('macro_events', []):
+            action, _, name = event.partition(' ')
+            if action == 'clear':
+                for previous in frontier:
+                    before(previous, item, 'undefineall')
+                writers.clear()
+                readers.clear()
+                cleared_at = item
+                frontier = {item}
+            elif action in {'define', 'undef'}:
+                before(writers.get(name, cleared_at), item, name)
+                for reader in readers.pop(name, set()):
+                    before(reader, item, name)
+                writers[name] = item
+                frontier.add(item)
+    return constrained
+
+
 def validate_macro_schedule(
     symbols: dict[Path, dict[str, list[str]]],
     timeline: Iterable[Path | tuple[str, str]],
@@ -157,8 +212,7 @@ def validate_macro_schedule(
         for name in info.get('macro_condition_undefined', []):
             if name in defined:
                 raise ValueError(f'Macro {name} is defined before {item}; parsed condition was undefined')
-        conditional = set(info.get('macro_condition_undefined', []))
-        for name in set(info.get('macro_uses', [])) & provider_names - conditional:
+        for name in set(info.get('macro_uses', [])) & provider_names:
             if name not in defined:
                 raise ValueError(f'Macro {name} is unavailable before {item}')
         for event in info.get('macro_events', []):

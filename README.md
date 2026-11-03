@@ -2,6 +2,8 @@
 
 从顶层模块收集 Verilog/SystemVerilog 依赖，生成 filelist。
 
+文档：[功能目录](docs/features.md)、[宏状态与文件顺序](docs/macro-state.md)、[变更记录](CHANGELOG.md)。
+
 ## 命令行参数
 
 | 长参数 | 短参数 | 类型 | 必填 | 默认值 | 说明 |

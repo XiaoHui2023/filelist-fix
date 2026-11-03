@@ -8,7 +8,7 @@ import tempfile
 import tarfile
 import zipfile
 
-from release_support import archive_name, binary_name, safe_archive_path, sha, target, version, write_json
+from release_support import DOCUMENTATION_FILES, archive_name, binary_name, safe_archive_path, sha, target, version, write_json
 from run_frozen_example import verify
 
 
@@ -34,6 +34,8 @@ def extract_checked(archive: Path, destination: Path) -> dict:
             raise ValueError(f"Archive content changed: {name}")
     if manifest["license_policy"] != "allow-required" or not (destination / "licenses/inventory.json").is_file():
         raise ValueError("Required redistribution notices missing")
+    if not set(DOCUMENTATION_FILES) <= set(manifest['files']):
+        raise ValueError("Required product documentation missing")
     return manifest
 
 

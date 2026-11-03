@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -36,3 +37,16 @@ def test_final_bytes_tampering_is_rejected(tmp_path: Path):
         z.writestr("program", "changed")
     with pytest.raises(ValueError, match="content changed"):
         extract_checked(archive, tmp_path / "out")
+
+
+def test_archive_without_product_design_docs_is_rejected(tmp_path):
+    files = {'README.md': 'readme', 'licenses/inventory.json': '{}'}
+    manifest = {'files': {name: hashlib.sha256(text.encode()).hexdigest() for name, text in files.items()},
+                'license_policy': 'allow-required'}
+    archive = tmp_path / 'old-layout.zip'
+    with zipfile.ZipFile(archive, 'w') as package:
+        package.writestr('release-manifest.json', json.dumps(manifest))
+        for name, text in files.items():
+            package.writestr(name, text)
+    with pytest.raises(ValueError, match='documentation missing'):
+        extract_checked(archive, tmp_path / 'out')

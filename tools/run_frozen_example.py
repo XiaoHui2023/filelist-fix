@@ -200,6 +200,39 @@ def verify(executable: Path) -> dict:
         assert stress_output.read_bytes() == preserved
         assert json.loads(timing.read_text())["files"][0]["status"] == "failed"
         checked.append("parse_timeout_preserves_old_list_and_failure_timing")
+        conditions = work / 'macro_conditions'
+        conditions.mkdir()
+        (conditions / 'z_probe.sv').write_text('module probe;\n`ifndef FLAG\nunset_leaf u();\n`else\nset_leaf u();\n`endif\nendmodule\n')
+        (conditions / 'a_defs.sv').write_text('`define FLAG\nmodule defs; endmodule\n')
+        (conditions / 'b_later.sv').write_text('`define FLAG 2\nmodule later; endmodule\n')
+        for leaf in ['set_leaf', 'unset_leaf']:
+            (conditions / (leaf + '.sv')).write_text('module ' + leaf + '; endmodule\n')
+        condition_out = conditions / 'out.f'
+        for pinned in [False, True]:
+            condition_args = ['-s', str(conditions), '-t', 'probe', 'defs', 'later', '-o', str(condition_out),
+                              '--save', str(conditions / 'cache.db')]
+            if pinned:
+                (conditions / 'pre.f').write_text('z_probe.sv\na_defs.sv\nb_later.sv\n')
+                condition_args += ['-p', str(conditions / 'pre.f')]
+            for _ in range(2):
+                run(condition_args)
+                lines = condition_out.read_text().splitlines()
+                assert lines.index('z_probe.sv') < lines.index('a_defs.sv') < lines.index('b_later.sv')
+                assert 'unset_leaf.sv' in lines and 'set_leaf.sv' not in lines
+            checked.append('undefined_probe_future_definitions_cold_warm_' + ('prelude' if pinned else 'auto'))
+        (conditions / 'b_later.sv').unlink()
+        (conditions / 'first.sv').write_text('`define WIDTH 8\nmodule first; endmodule\n')
+        (conditions / 'z_probe.sv').write_text('module probe;\nlocalparam int W=`WIDTH;\nendmodule\n')
+        (conditions / 'a_later.sv').write_text('`define WIDTH 16\nmodule later; endmodule\n')
+        run(['-s', str(conditions), '-t', 'first', 'probe', 'later', '-o', str(condition_out)])
+        assert condition_out.read_text().splitlines() == ['first.sv', 'z_probe.sv', 'a_later.sv']
+        checked.append('actual_macro_read_between_redefinitions')
+        (conditions / 'z_probe.sv').write_text('module probe;\nimport p::*;\n`ifndef FLAG\nwire absent_branch;\n`endif\nendmodule\n')
+        (conditions / 'p.sv').write_text('`define FLAG\npackage p; endpackage\n')
+        preserved = condition_out.read_bytes()
+        run(['-s', str(conditions), '-t', 'probe', '-o', str(condition_out)], 1)
+        assert condition_out.read_bytes() == preserved
+        checked.append('package_conditional_state_conflict_preserves_output')
     return {"executable": executable.name, "sha256": sha(executable), "features": checked,
             "seconds": round(time.monotonic() - started, 3), "independent_cwd": True,
             "empty_path": True, "source_imports_disabled": True, "stress_samples": stress_samples}

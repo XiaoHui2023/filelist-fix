@@ -2,7 +2,7 @@
 from __future__ import annotations
 import shutil, subprocess, tempfile, zipfile
 from pathlib import Path
-from release_support import ROOT, archive_name, binary_name, sha, target, version, write_json
+from release_support import ROOT, DOCUMENTATION_FILES, archive_name, binary_name, sha, target, version, write_json
 
 def main() -> None:
     dist=ROOT/"dist"; executable=dist/binary_name(); notices=ROOT/"build/release-notices"
@@ -11,7 +11,10 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="filelist-bundle-") as temp:
         staging=Path(temp)
         shutil.copy2(executable,staging/executable.name)
-        shutil.copy2(ROOT/"README.md",staging/"README.md")
+        for name in DOCUMENTATION_FILES:
+            destination = staging/name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT/name,destination)
         shutil.copytree(notices,staging/"licenses")
         manifest={"product":"filelist-fix","version":version(),"target":target(),
                   "source_sha":subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip(),

@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+DOCUMENTATION_FILES = ('README.md', 'CHANGELOG.md', 'docs/features.md', 'docs/macro-state.md')
 
 
 def version() -> str:

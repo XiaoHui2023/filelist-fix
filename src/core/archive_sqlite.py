@@ -28,7 +28,7 @@ class CachedFileRecord:
     symbols_json: str = "{}"
 
 
-_ARCHIVE_SCHEMA_VERSION = "8"
+_ARCHIVE_SCHEMA_VERSION = "9"
 
 
 class FileParseArchive:

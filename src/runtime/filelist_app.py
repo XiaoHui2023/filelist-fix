@@ -22,7 +22,7 @@ from api.events.filelist_build import (
 from api.events.progress import OnProgressAPI
 from core.archive_sqlite import FileParseArchive
 from core.bin_resolve import ToolBinaryLocator, normalize_search_roots
-from core.dep_order import (add_macro_prerequisites, prerequisite_edges, topo_prereq_first,
+from core.dep_order import (add_macro_prerequisites, add_macro_state_prerequisites, prerequisite_edges, topo_prereq_first,
                             schedule_prelude_dependencies, validate_macro_schedule, prioritize_macro_order)
 from core.fd_search import FdModuleSearch
 from core.hdl_extensions import HD_SOURCE_EXTENSIONS
@@ -71,6 +71,7 @@ class FilelistSessionState:
     satisfied_type_scopes: set[str] = field(default_factory=set)
     macro_origins: dict[str, Path | None] = field(default_factory=dict)
     file_macro_bindings: dict[Path, dict[str, Path | None]] = field(default_factory=dict)
+    macro_input_timeline: list[Path | tuple[str, str]] = field(default_factory=list)
     parsed_resolved: set[Path] = field(default_factory=set)
     defines: dict[str, str] = field(default_factory=dict)
     incdirs: list[Path] = field(default_factory=list)
@@ -97,6 +98,7 @@ class FilelistSessionState:
         self.parsed_resolved.add(logical_abs(hit).resolve())
 
     def note_symbols(self, path: Path, symbols: dict[str, list[str]]) -> None:
+        self.macro_input_timeline.append(path)
         self.file_symbols[path] = symbols
         self.file_macro_bindings[path] = {name: self.macro_origins[name]
                                           for name in symbols.get('macro_uses', []) if name in self.macro_origins}
@@ -362,6 +364,7 @@ class FilelistApplication:
             if entry.kind == "define":
                 st.defines[entry.name] = entry.value
                 st.macro_origins[entry.name] = None
+                st.macro_input_timeline.append(('define', entry.name))
             elif entry.kind == "incdir":
                 st.incdirs.append(entry.path)
             else:
@@ -580,6 +583,9 @@ class FilelistApplication:
             topo_prereq_first(premap, premap)
             macro_edges: set[tuple[Path, Path]] = set()
             macro_constraints = add_macro_prerequisites(premap, st.file_symbols, st.file_macro_bindings, macro_edges)
+            macro_constraints.update(add_macro_state_prerequisites(
+                premap, st.file_symbols, st.file_macro_bindings, st.macro_input_timeline, macro_edges,
+            ))
             prioritize_macro_order(premap, st.file_symbols, macro_edges, prelude_sources)
             nodes = set(st.file_refs.keys()) | {x for ss in premap.values() for x in ss}
             before, ordered = schedule_prelude_dependencies(

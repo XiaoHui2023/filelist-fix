@@ -35,9 +35,10 @@ class PreprocDirectiveParser:
     def _note_macro_read(self, name: str, *, condition: bool = False) -> None:
         if not name or self._local_all or name in self._local_changes:
             return
-        self._macro_reads.add(name)
         if condition:
             self._conditions[name] = name in self.defines
+        else:
+            self._macro_reads.add(name)
 
     def macro_symbols(self) -> dict[str, list[str]]:
         return {
