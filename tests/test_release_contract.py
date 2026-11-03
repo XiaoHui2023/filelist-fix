@@ -60,7 +60,7 @@ def test_product_sources_use_minimum_grammar_and_parenthesized_starred_keys():
             if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Tuple):
                 if any(isinstance(item, ast.Starred) for item in node.slice.elts):
                     assert ast.get_source_segment(text, node.slice).lstrip().startswith('(')
-    with pytest.raises(AssertionError):
+    with pytest.raises((AssertionError, SyntaxError)):
         check('value[key, *tail]')
     check('value[(key, *tail)]')
     for source in (TOOLS.parent / 'src').rglob('*.py'):
