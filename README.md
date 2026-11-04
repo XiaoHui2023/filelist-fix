@@ -2,7 +2,7 @@
 
 从顶层模块收集 Verilog/SystemVerilog 依赖，生成 filelist。
 
-文档：[功能目录](docs/features.md)、[宏状态与文件顺序](docs/macro-state.md)、[定位复用与解析进度](docs/search-and-progress.md)、[变更记录](CHANGELOG.md)。
+文档：[功能目录](docs/features.md)、[宏状态与文件顺序](docs/macro-state.md)、[定位复用与解析进度](docs/search-and-progress.md)、[显式库文件](docs/library-inputs.md)、[变更记录](CHANGELOG.md)。
 
 ## 命令行参数
 
@@ -19,6 +19,8 @@
 | `--debug-dump` |  | 目录路径 |  |  | 依赖分析调试输出 |
 
 ## 使用
+
+需要同时保留含同名 UDP/模块的库文件时，在 `-p` 指定的前导 filelist 中分别写入 `-v path`。生成清单保留全部库文件和前缀；普通源码重复定义仍报错，详见[显式库文件](docs/library-inputs.md)。
 
 ```makefile
 TOOL := /path/to/tool               # 可执行文件或脚本

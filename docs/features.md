@@ -8,7 +8,7 @@ filelist-fix 根据顶层模块、检索范围和前导文件收集 HDL 依赖�
 | F-PREPROCESS | 条件编译与 include | 收集活动分支；include 与宿主源码共享当前位置的宏状态 |
 | F-CLOSURE | 依赖收集 | 从顶层递归收集模块、package 与用户原语；缺少必要定义或 include 时失败 |
 | F-SCOPE | 作用域引用 | 保留包依赖；区分本地类、导入类型与包，作用域函数调用不当作模块实例 |
-| F-LIBRARY | 库模块检索 | 将 `-y`、`+libext+` 指定的库候选纳入按需依赖检索 |
+| F-LIBRARY | 库输入与检索 | 保留显式 `-v` 库角色及顺序，允许不同显式库含同名 UDP/模块；`-y`、`+libext+` 纳入按需依赖检索 |
 | F-ORDER | 编译顺序 | 保留包前置、固定前导顺序和真实宏要求；允许普通模块前向引用解决宏顺序冲突 |
 | F-MACRO-PROBE | 条件宏探测 | `ifdef`、`ifndef`、`elsif` 根据当前位置是否定义选择分支，未定义是合法状态 |
 | F-MACRO-READ | 真实宏读取 | 对实际宏展开保留已知定义来源；读取不能越过改变其值的后续重定义 |
@@ -20,4 +20,4 @@ filelist-fix 根据顶层模块、检索范围和前导文件收集 HDL 依赖�
 | F-OUTPUT | 清单保护 | 成功完成收集与排序后原子替换输出；解析、缺依赖和顺序冲突不覆盖旧清单 |
 | F-RELEASE | 可执行程序 | Windows 与 Linux 分别构建、校验归档、下载后运行；包中附带必要许可文本 |
 
-设计见 [宏状态与文件顺序](macro-state.md)、[定位复用与解析进度](search-and-progress.md)。
+设计见 [宏状态与文件顺序](macro-state.md)、[定位复用与解析进度](search-and-progress.md)、[显式库文件](library-inputs.md)。

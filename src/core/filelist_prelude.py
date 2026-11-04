@@ -119,7 +119,7 @@ def _resolve_incdir(prelude_file: Path, inc: str) -> Path:
 
 @dataclass
 class PreludeEntry:
-    kind: Literal["source", "define", "incdir"]
+    kind: Literal["source", "library", "define", "incdir"]
     line_index: int
     path: Path | None = None
     name: str = ""
@@ -138,13 +138,19 @@ class PreludeOutcome:
     library_extensions: list[str] = field(default_factory=lambda: [".v", ".sv"])
     _libext_explicit: bool = field(default=False, repr=False)
 
-    def add_source(self, path: Path, output_path: Path, absolute: bool) -> None:
+    def add_source(self, path: Path, output_path: Path, absolute: bool, *, library: bool = False) -> None:
         """Record each source once, retaining its first logical path and position."""
-        if any(e.kind == "source" and e.path.resolve() == path.resolve()
-               for e in self.entries):
-            return
-        self.entries.append(PreludeEntry("source", len(self.head_lines), path=path))
-        self.head_lines.append(format_listed_path(path, output_path, absolute=absolute))
+        kind = 'library' if library else 'source'
+        for entry in self.entries:
+            if entry.kind in {'source', 'library'} and entry.path.resolve() == path.resolve():
+                if entry.kind != kind:
+                    raise ValueError(f'Conflicting source/library roles for {path}')
+                return
+        self.entries.append(PreludeEntry(kind, len(self.head_lines), path=path))
+        listed = format_listed_path(path, output_path, absolute=absolute)
+        if library:
+            listed = '-v ' + ('"' + listed + '"' if any(c.isspace() for c in listed) else listed)
+        self.head_lines.append(listed)
 
 
 def _consume_one_filelist(
@@ -204,7 +210,7 @@ def _consume_one_filelist(
                 src = _resolve_path_token(host_parent, tok)
                 if not src.is_file():
                     raise FileNotFoundError(f"-v 源文件不存在: {src}（自 {path_log}）")
-                outcome.add_source(src, output_path, path_absolute)
+                outcome.add_source(src, output_path, path_absolute, library=True)
             continue
 
         ym = _Y_LINE.match(s)

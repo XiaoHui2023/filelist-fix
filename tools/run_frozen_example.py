@@ -255,6 +255,26 @@ def verify(executable: Path) -> dict:
             assert tools.count('rg') == (0 if warm else 3)
             assert 'slow dependency extraction' not in text
         checked.append('wide_closure_batched_location_cold_warm_exact_files')
+        libraries = work / 'explicit_libraries'; libraries.mkdir()
+        udp = 'primitive shared_udp(q,a);\noutput q; input a;\ntable\n0 : 0;\n1 : 1;\nendtable\nendprimitive\n'
+        (libraries / 'a.v').write_text(udp + 'module only_a; endmodule\n')
+        (libraries / 'b.v').write_text(udp + 'module only_b; endmodule\n')
+        (libraries / 'top.sv').write_text('module top; wire q,a; shared_udp u(q,a); only_a x(); only_b y(); endmodule\n')
+        library_pre = libraries / 'pre.f'
+        library_out = libraries / 'out.f'
+        library_args = ['-s', str(libraries), '-t', 'top', '-p', str(library_pre),
+                        '-o', str(library_out), '--save', str(libraries / 'cache.db')]
+        for order in [('a.v', 'b.v'), ('b.v', 'a.v')]:
+            library_pre.write_text(''.join('-v ' + name + '\n' for name in order))
+            for _ in range(2):
+                run(library_args)
+                assert library_out.read_text().splitlines() == ['-v ' + name for name in order] + ['top.sv']
+        checked.append('explicit_duplicate_udp_libraries_both_required_keep_flags_order_cold_warm')
+        preserved = library_out.read_bytes()
+        library_pre.write_text('a.v\nb.v\n')
+        assert 'Duplicate definition' in run(library_args, 1).stderr
+        assert library_out.read_bytes() == preserved
+        checked.append('ordinary_duplicate_udp_still_fails_and_preserves_output')
     return {"executable": executable.name, "sha256": sha(executable), "features": checked,
             "seconds": round(time.monotonic() - started, 3), "independent_cwd": True,
             "empty_path": True, "source_imports_disabled": True, "stress_samples": stress_samples}

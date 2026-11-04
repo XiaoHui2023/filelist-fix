@@ -67,6 +67,8 @@ class FilelistSessionState:
     """一次构建中维护模块到文件的映射、每文件引用表与已解析集合。"""
 
     module_to_file: dict[str, Path] = field(default_factory=dict)
+    library_providers: dict[str, list[Path]] = field(default_factory=dict)
+    library_sources: set[Path] = field(default_factory=set)
     file_refs: dict[Path, list[str]] = field(default_factory=dict)
     file_symbols: dict[Path, dict[str, list[str]]] = field(default_factory=dict)
     scope_resolution_dirty: bool = False
@@ -153,25 +155,28 @@ class ModuleResolveTools:
         self._fd = FdModuleSearch(fd_exe)
         self._rg = RgModuleSearch(rg_exe)
         self._excludes = excludes or []
+        self._module_excludes = self._excludes
         self.pending_names: list[str] = []
 
-    def reset(self) -> None:
+    def reset(self, *, library_sources: list[Path] | None = None) -> None:
         self._fd._indexes.clear()
         self._rg._results.clear()
         self.pending_names.clear()
+        self._module_excludes = [*self._excludes, *(library_sources or [])]
 
     def find_all(self, module: str, roots: list[Path]) -> list[Path]:
-        fd_hits = self._fd.search_all(module, roots, self._excludes)
+        excludes = self._module_excludes
+        fd_hits = self._fd.search_all(module, roots, excludes)
         if len(fd_hits) > 1:
             return fd_hits
         if len(fd_hits) == 1:
             return fd_hits
-        if not self._rg.has_result(module, roots, self._excludes):
+        if not self._rg.has_result(module, roots, excludes):
             pending = [module, *self.pending_names]
             pending = list(dict.fromkeys(name for name in pending
-                                       if not self._fd.search_all(name, roots, self._excludes)))
-            self._rg.search_many(pending, roots, self._excludes)
-        return self._rg.search_all(module, roots, self._excludes)
+                                       if not self._fd.search_all(name, roots, excludes)))
+            self._rg.search_many(pending, roots, excludes)
+        return self._rg.search_all(module, roots, excludes)
 
     def fd_search_by_filename(
         self,
@@ -240,7 +245,8 @@ class FilelistApplication:
                     break
             # Library candidates are cheap exact-name probes. Recheck them so new
             # duplicates, exclusions and extension changes cannot hide behind hints.
-            if not hp.is_file() or path_is_excluded(hp, self._exclude_paths) or not source_allowed:
+            if (not hp.is_file() or path_is_excluded(hp, self._exclude_paths) or not source_allowed
+                    or hp.resolve() in self._ctx.session_state.library_sources):
                 self._save.delete_module_hint(mod)
             else:
                 rec = self._save.get_valid(hp)
@@ -256,6 +262,10 @@ class FilelistApplication:
                     self._save.invalidate_module_hints_for_stale_file(hp)
                     return hp
         hits = self._tools.find_all(mod, self._search_roots)
+        if not hits:
+            providers = self._ctx.session_state.library_providers.get(mod, [])
+            if providers:
+                return providers[0]
         if not hits:
             hits = list(dict.fromkeys(
                 logical_abs(directory / (mod + ext))
@@ -281,12 +291,19 @@ class FilelistApplication:
         st: FilelistSessionState,
         hit: Path,
         defs: list[str],
+        *, library: bool = False, packages: tuple[str, ...] | list[str] = (),
     ) -> bool:
-        """将定义名写入 module_to_file；若同名已映射到其它文件则发重复错误并返回 False。"""
+        """登记普通定义与有序库候选；普通定义和包的冲突返回 False。"""
         names = list(dict.fromkeys(defs))
+        if library:
+            for name in names:
+                if name not in packages:
+                    st.library_providers.setdefault(name, []).append(hit)
+            names = [name for name in names if name in packages]
         for name in names:
             prev = st.module_to_file.get(name)
-            if prev is not None and prev.resolve() != hit.resolve():
+            if (prev is not None and prev.resolve() != hit.resolve()
+                    and prev not in st.library_providers.get(name, [])):
                 ctx.fire(
                     OnModuleResolveDuplicateAPI,
                     module_name=name,
@@ -294,7 +311,7 @@ class FilelistApplication:
                 )
                 return False
         for name in names:
-            st.module_to_file.setdefault(name, hit)
+            st.module_to_file[name] = hit
         return True
 
     @staticmethod
@@ -365,7 +382,6 @@ class FilelistApplication:
             ctx.fire(OnSessionEndAPI)
 
     def _run_orchestration(self, ctx: Any) -> ResolvedBuild | None:
-        self._tools.reset()
         if self._prelude_paths:
             pre, _ = load_prelude_files_with_signature(
                 self._prelude_paths,
@@ -377,6 +393,8 @@ class FilelistApplication:
         self._library_dirs = pre.library_dirs
         self._library_extensions = pre.library_extensions
         st = FilelistSessionState()
+        st.library_sources = {entry.path.resolve() for entry in pre.entries if entry.kind == 'library'}
+        self._tools.reset(library_sources=[entry.path for entry in pre.entries if entry.kind == 'library'])
         ctx.search_roots = list(dict.fromkeys([*self._search_roots, *self._library_dirs]))
         ctx.exclude_paths = self._exclude_paths
         ctx.session_state = st
@@ -406,7 +424,9 @@ class FilelistApplication:
                 self._restore_discovered_incdirs(
                     st, hit, [p for p in st.incdirs if p not in before_incdirs],
                 )
-                if not self._register_defined_modules(ctx, st, hit, defs):
+                if not self._register_defined_modules(ctx, st, hit, defs,
+                                                     library=entry.kind == 'library',
+                                                     packages=symbols.get('package_definitions', [])):
                     return None
                 st.file_refs[hit] = list(refs)
                 st.note_symbols(hit, symbols)
@@ -506,6 +526,9 @@ class FilelistApplication:
                     log.debug("module %r -> %s", mod, hit)
 
                 if st.inode_was_parsed(hit):
+                    if hit in st.library_providers.get(mod, []):
+                        st.module_to_file[mod] = hit
+                        continue
                     st.note_unresolved(mod)
                     ctx.fire(OnModuleResolveMissAPI, module_name=mod)
                     continue
@@ -607,7 +630,12 @@ class FilelistApplication:
             ctx.fire(OnProgressAPI, phase="", current=1, total=1, message="done")
             return rb
 
-        premap = prerequisite_edges(st.file_refs, st.module_to_file)
+        # Library options are retained providers, not ordinary module-order edges.
+        # Packages still require their normal declaration-before-use ordering.
+        ordered_definitions = {name: path for name, path in st.module_to_file.items()
+                               if path.resolve() not in st.library_sources
+                               or name in st.file_symbols.get(path, {}).get('package_definitions', [])}
+        premap = prerequisite_edges(st.file_refs, ordered_definitions)
         macro_constraints: set[str] = set()
         try:
             topo_prereq_first(premap, premap)
