@@ -3,7 +3,35 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def path_is_excluded(candidate: Path, excludes: list[Path]) -> bool:
+class PathExclusions:
+    """Compile file identities and directory anchors for one search session."""
+
+    def __init__(self, paths):
+        self.paths = tuple(paths)
+        self.files: set[Path] = set()
+        self.directories: set[Path] = set()
+        self.identities: dict[Path, Path] = {}
+        for path in self.paths:
+            try:
+                identity = path.resolve(strict=False)
+                (self.directories if identity.is_dir() else self.files).add(identity)
+            except OSError:
+                continue
+
+    def __iter__(self):
+        return iter(self.paths)
+
+    def __len__(self):
+        return len(self.paths)
+
+    def contains(self, candidate: Path) -> bool:
+        if candidate not in self.identities:
+            self.identities[candidate] = candidate.resolve(strict=False)
+        identity = self.identities[candidate]
+        return identity in self.files or any(parent in self.directories for parent in (identity, *identity.parents))
+
+
+def path_is_excluded(candidate: Path, excludes: list[Path] | PathExclusions) -> bool:
     """若 candidate 落在任一排除项之下则返回 True。
 
     比较前对候选与排除锚点均做 ``resolve(strict=False)``，使「经软链进入的源树」与「经软链给出的
@@ -18,6 +46,8 @@ def path_is_excluded(candidate: Path, excludes: list[Path]) -> bool:
     """
     if not excludes:
         return False
+    if isinstance(excludes, PathExclusions):
+        return excludes.contains(candidate)
     c = candidate.resolve(strict=False)
     for ex in excludes:
         try:

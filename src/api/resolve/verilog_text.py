@@ -12,6 +12,16 @@ class JoinContinuedLinesAPI(BaseAPI):
     joined_text: str = Field(default="", description="Output after joining \\ continuations")
 
 
+class InspectLibrarySourceAPI(BaseAPI):
+    """Inspect source-local cell evidence without changing preprocessing state."""
+
+    source_text: str = Field(description="Raw source text")
+    definitions: list[str] = Field(default_factory=list, description="Declared compilation units")
+    cell_definitions: list[str] = Field(default_factory=list, description="Units explicitly enclosed by celldefine")
+    directory_safe: bool = Field(default=False, description="Self-contained single-unit library candidate")
+    reason: str = Field(default="", description="Reason directory conversion is unsafe")
+
+
 class MaskPreprocessorCommentsAPI(BaseAPI):
     """Mask comments before directive evaluation, preserving include strings."""
 

@@ -137,15 +137,33 @@ class PreludeOutcome:
     library_dirs: list[Path] = field(default_factory=list)
     library_extensions: list[str] = field(default_factory=lambda: [".v", ".sv"])
     _libext_explicit: bool = field(default=False, repr=False)
+    _source_roles: dict[Path, str] = field(default_factory=dict, init=False, repr=False)
+
+    def add_libext(self, specification: str) -> None:
+        if not self._libext_explicit:
+            self.library_extensions.clear()
+            self._libext_explicit = True
+        suffixes = []
+        for value in specification.split('+'):
+            value = value.strip()
+            if any(char.isspace() for char in value):
+                raise ValueError('Invalid +libext+ suffix; use +libext+.v+.sv')
+            suffix = '.' + value.lstrip('.') if value else ''
+            if suffix not in self.library_extensions:
+                self.library_extensions.append(suffix)
+            suffixes.append(suffix)
+        self.head_lines.append('+libext+' + '+'.join(suffixes))
 
     def add_source(self, path: Path, output_path: Path, absolute: bool, *, library: bool = False) -> None:
         """Record each source once, retaining its first logical path and position."""
         kind = 'library' if library else 'source'
-        for entry in self.entries:
-            if entry.kind in {'source', 'library'} and entry.path.resolve() == path.resolve():
-                if entry.kind != kind:
-                    raise ValueError(f'Conflicting source/library roles for {path}')
-                return
+        identity = path.resolve()
+        previous = self._source_roles.get(identity)
+        if previous is not None:
+            if previous != kind:
+                raise ValueError(f'Conflicting source/library roles for {path}')
+            return
+        self._source_roles[identity] = kind
         self.entries.append(PreludeEntry(kind, len(self.head_lines), path=path))
         listed = format_listed_path(path, output_path, absolute=absolute)
         if library:
@@ -215,26 +233,26 @@ def _consume_one_filelist(
 
         ym = _Y_LINE.match(s)
         if ym:
-            tok = _parse_first_path_token(ym.group(1))
+            rest = ym.group(1).strip()
+            tok = _parse_first_path_token(rest)
             if tok:
+                consumed = len(tok) + (2 if rest.startswith(('"', "'")) else 0)
+                tail = rest[consumed:].strip()
+                if tail and not tail.startswith('+libext+'):
+                    raise ValueError('Unexpected -y arguments; use -y DIR and +libext+.v')
                 ydir = _resolve_path_token(host_parent, tok)
                 if not ydir.is_dir():
                     raise FileNotFoundError(f"-y 目录不存在: {ydir}（自 {path_log}）")
                 disp = format_listed_path(ydir, output_path, absolute=path_absolute)
-                outcome.head_lines.append(f"-y {disp}")
+                outcome.head_lines.append('-y ' + ('"' + disp + '"' if any(c.isspace() for c in disp) else disp))
                 if ydir not in outcome.library_dirs:
                     outcome.library_dirs.append(ydir)
+                if tail:
+                    outcome.add_libext(tail[len('+libext+'):])
             continue
 
         if s.startswith("+libext+"):
-            if not outcome._libext_explicit:
-                outcome.library_extensions.clear()
-                outcome._libext_explicit = True
-            for ext in s[len("+libext+"):].split("+"):
-                suffix = "." + ext.lstrip(".") if ext else ""
-                if suffix not in outcome.library_extensions:
-                    outcome.library_extensions.append(suffix)
-            outcome.head_lines.append(s)
+            outcome.add_libext(s[len('+libext+'):])
             continue
 
         im = _INCDIR.match(s)

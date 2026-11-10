@@ -27,10 +27,11 @@ from core.dep_order import (add_macro_prerequisites, add_macro_state_prerequisit
                             schedule_prelude_dependencies, validate_macro_schedule, prioritize_macro_order)
 from core.fd_search import FdModuleSearch
 from core.hdl_extensions import HD_SOURCE_EXTENSIONS
+from core.library_directories import LibraryDirectoryPlan
 from core.filelist_paths import format_incdir_line, format_listed_path
 from core.filelist_prelude import PreludeOutcome, load_prelude_files_with_signature
 from core.path_logical import logical_abs
-from core.path_exclude import path_is_excluded
+from core.path_exclude import PathExclusions, path_is_excluded
 from core.rg_search import RgModuleSearch
 from core.search_process import SearchFailure
 from core.source_flatten import extract_dependencies_from_file
@@ -154,7 +155,7 @@ class ModuleResolveTools:
     ) -> None:
         self._fd = FdModuleSearch(fd_exe)
         self._rg = RgModuleSearch(rg_exe)
-        self._excludes = excludes or []
+        self._excludes = PathExclusions(excludes or [])
         self._module_excludes = self._excludes
         self.pending_names: list[str] = []
 
@@ -162,7 +163,7 @@ class ModuleResolveTools:
         self._fd._indexes.clear()
         self._rg._results.clear()
         self.pending_names.clear()
-        self._module_excludes = [*self._excludes, *(library_sources or [])]
+        self._module_excludes = PathExclusions([*self._excludes, *(library_sources or [])])
 
     def find_all(self, module: str, roots: list[Path]) -> list[Path]:
         excludes = self._module_excludes
@@ -206,6 +207,7 @@ class FilelistApplication:
         save_path: Path | None,
         path_style: Literal["relative", "absolute"] = "relative",
         exclude_paths: list[Path] | None = None,
+        library_directories: bool = False,
         ctx: Any,
     ) -> None:
         loc = ToolBinaryLocator()
@@ -219,6 +221,8 @@ class FilelistApplication:
         self._save_path = save_path
         self._library_dirs: list[Path] = []
         self._library_extensions: list[str] = []
+        self._compact_libraries = library_directories
+        self._library_plan = None
         self._tools = ModuleResolveTools(
             loc.resolve_fd(),
             loc.resolve_rg(),
@@ -246,7 +250,9 @@ class FilelistApplication:
             # Library candidates are cheap exact-name probes. Recheck them so new
             # duplicates, exclusions and extension changes cannot hide behind hints.
             if (not hp.is_file() or path_is_excluded(hp, self._exclude_paths) or not source_allowed
-                    or hp.resolve() in self._ctx.session_state.library_sources):
+                    or hp.resolve() in self._ctx.session_state.library_sources
+                    or (self._library_plan is not None and
+                        (hp.parent.resolve() in self._library_plan.directories or self._library_plan.is_cell(hp)))):
                 self._save.delete_module_hint(mod)
             else:
                 rec = self._save.get_valid(hp)
@@ -273,6 +279,10 @@ class FilelistApplication:
                 if (directory / (mod + ext)).is_file()
                 and not path_is_excluded(directory / (mod + ext), self._exclude_paths)
             ))
+            if self._compact_libraries and hits:
+                selected = hits[0]
+                self._ctx.session_state.library_sources.add(selected.resolve())
+                return selected
         if len(hits) > 1:
             ctx = self._ctx
             ctx.fire(
@@ -338,20 +348,21 @@ class FilelistApplication:
             total=1,
             message=f"write · {self._output.name}",
         )
-        lines: list[str] = []
+        rows: list[tuple[str, Path | None]] = []
         def append_source(path: Path) -> None:
-            lines.extend(rb.state.incdir_lines_before.get(path, ()))
-            lines.append(format_listed_path(path, self._output, absolute=self._path_absolute))
+            rows.extend((line, None) for line in rb.state.incdir_lines_before.get(path, ()))
+            rows.append((format_listed_path(path, self._output, absolute=self._path_absolute), path))
 
         for index, h in enumerate(rb.head_lines):
             for dependency in rb.prelude_dependencies.get(index, ()):
                 append_source(dependency)
             source = rb.prelude_sources.get(index)
             if source is not None:
-                lines.extend(rb.state.incdir_lines_before.get(source, ()))
-            lines.append(h.rstrip("\n"))
+                rows.extend((line, None) for line in rb.state.incdir_lines_before.get(source, ()))
+            rows.append((h.rstrip("\n"), source))
         for p in rb.ordered_paths:
             append_source(p)
+        lines = self._library_plan.compact(rows, rb.state) if self._library_plan is not None else [line for line, _ in rows]
         text = "\n".join(lines) + "\n"
         ctx.fire(OnFilelistWriteAPI, output_path=self._output, text=text)
 
@@ -393,8 +404,15 @@ class FilelistApplication:
         self._library_dirs = pre.library_dirs
         self._library_extensions = pre.library_extensions
         st = FilelistSessionState()
+        self._library_plan = (LibraryDirectoryPlan(ctx, pre, tops=self._tops, excludes=self._exclude_paths,
+                                                  output=self._output, absolute=self._path_absolute)
+                              if self._compact_libraries else None)
         st.library_sources = {entry.path.resolve() for entry in pre.entries if entry.kind == 'library'}
-        self._tools.reset(library_sources=[entry.path for entry in pre.entries if entry.kind == 'library'])
+        library_files = [entry.path for entry in pre.entries if entry.kind == 'library']
+        if self._compact_libraries:
+            library_files.extend(path for directory in pre.library_dirs for path in directory.iterdir()
+                                 if path.is_file() and path.suffix in pre.library_extensions)
+        self._tools.reset(library_sources=library_files)
         ctx.search_roots = list(dict.fromkeys([*self._search_roots, *self._library_dirs]))
         ctx.exclude_paths = self._exclude_paths
         ctx.session_state = st
@@ -424,8 +442,12 @@ class FilelistApplication:
                 self._restore_discovered_incdirs(
                     st, hit, [p for p in st.incdirs if p not in before_incdirs],
                 )
+                is_library = (entry.kind == 'library' or
+                              (self._library_plan is not None and self._library_plan.is_cell(hit)))
+                if is_library:
+                    st.library_sources.add(hit.resolve())
                 if not self._register_defined_modules(ctx, st, hit, defs,
-                                                     library=entry.kind == 'library',
+                                                     library=is_library,
                                                      packages=symbols.get('package_definitions', [])):
                     return None
                 st.file_refs[hit] = list(refs)
@@ -522,6 +544,8 @@ class FilelistApplication:
                         )
                     continue
                 hit = st.canonical_source_path(hit)
+                if self._library_plan is not None and self._library_plan.is_cell(hit):
+                    st.library_sources.add(hit.resolve())
                 if log is not None and log.isEnabledFor(logging.DEBUG):
                     log.debug("module %r -> %s", mod, hit)
 
@@ -590,10 +614,17 @@ class FilelistApplication:
                     referenced_count=len(refs),
                 )
 
-                self._save.upsert_module_hints(hit, defs, [])
-
-                if not self._register_defined_modules(ctx, st, hit, defs):
+                is_library = hit.resolve() in st.library_sources
+                if is_library:
+                    for name in defs:
+                        self._save.delete_module_hint(name)
+                else:
+                    self._save.upsert_module_hints(hit, defs, [])
+                if not self._register_defined_modules(ctx, st, hit, defs, library=is_library,
+                                                     packages=symbols.get('package_definitions', [])):
                     break
+                if is_library and mod in defs:
+                    st.module_to_file[mod] = hit
                 st.file_refs[hit] = list(refs)
                 st.note_symbols(hit, symbols)
                 st.note_inode_parsed(hit)

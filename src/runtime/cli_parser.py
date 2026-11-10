@@ -108,4 +108,8 @@ def build_parser() -> argparse.ArgumentParser:
             "No relation to -l."
         ),
     )
+    p.add_argument(
+        '--library-directories', action='store_true',
+        help='Emit eligible library cells using -y directories and +libext+; retain unsafe files as -v.',
+    )
     return p

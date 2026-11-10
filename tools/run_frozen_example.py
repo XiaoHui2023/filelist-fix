@@ -275,6 +275,33 @@ def verify(executable: Path) -> dict:
         assert 'Duplicate definition' in run(library_args, 1).stderr
         assert library_out.read_bytes() == preserved
         checked.append('ordinary_duplicate_udp_still_fails_and_preserves_output')
+        cells = work / 'directory_cells'; cells.mkdir()
+        models = cells / 'models space'; models.mkdir()
+        names = [f'cell{i}' for i in range(8)]
+        for name in names:
+            (models / (name + '.v')).write_text('`celldefine\nmodule ' + name + '; endmodule\n`endcelldefine\n')
+        (cells / 'top.sv').write_text('module top;\n' + ''.join(name + ' u' + str(i) + '();\n' for i, name in enumerate(names)) + 'endmodule\n')
+        (cells / 'pre.f').write_text(''.join('-v "models space/' + name + '.v"\n' for name in names))
+        args = ['-s', str(cells), '-t', 'top', '-p', str(cells / 'pre.f'), '-o', str(cells / 'out.f'),
+                '--save', str(cells / 'cache.db'), '--library-directories']
+        for _ in range(2):
+            run(args)
+            assert (cells / 'out.f').read_text().splitlines() == ['+libext+.v', '-y "models space"', 'top.sv']
+        checked.append('directory_libraries_compact_eight_explicit_files_cold_warm')
+        (cells / 'pre.f').write_text('-y "models space" +libext+ .v\n')
+        run(args)
+        assert (cells / 'out.f').read_text().splitlines() == ['+libext+.v', '-y "models space"', 'top.sv']
+        checked.append('combined_library_syntax_normalizes_without_plain_duplicates')
+        (models / 'cell0.v').write_text('module cell0; missing_child u(); endmodule\n')
+        preserved = (cells / 'out.f').read_bytes()
+        assert 'missing_child' in run(args, 1).stderr
+        assert (cells / 'out.f').read_bytes() == preserved
+        checked.append('directory_library_missing_dependency_preserves_output')
+        (models / 'cell0.v').write_text('module cell0; endmodule\nmodule helper; endmodule\n')
+        (cells / 'pre.f').write_text(''.join('-v "models space/' + name + '.v"\n' for name in names))
+        run(args)
+        assert (cells / 'out.f').read_text().splitlines() == ['-v "models space/' + name + '.v"' for name in names] + ['top.sv']
+        checked.append('directory_ineligible_bundle_retains_explicit_library_files')
     return {"executable": executable.name, "sha256": sha(executable), "features": checked,
             "seconds": round(time.monotonic() - started, 3), "independent_cwd": True,
             "empty_path": True, "source_imports_disabled": True, "stress_samples": stress_samples}

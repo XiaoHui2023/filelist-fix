@@ -88,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
             save_path=args.save,
             path_style=args.path_style,
             exclude_paths=[Path(x) for x in excludes],
+            library_directories=args.library_directories,
             ctx=ctx,
         )
         rb = app.run()

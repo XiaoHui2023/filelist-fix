@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from core.hdl_extensions import rg_include_globs
-from core.path_exclude import path_is_excluded
+from core.path_exclude import PathExclusions, path_is_excluded
 from core.path_logical import logical_abs
 from core.search_process import run_search
 
@@ -25,10 +25,10 @@ class RgModuleSearch:
     def _pattern(self, module_name: str) -> str:
         return rf"\b(?:module|macromodule|primitive|package)\s+(?:(?:automatic|static)\s+)?{re.escape(module_name)}\b"
 
-    def has_result(self, name: str, roots: list[Path], excludes: list[Path] | None = None) -> bool:
+    def has_result(self, name: str, roots: list[Path], excludes: list[Path] | PathExclusions | None = None) -> bool:
         return (name, tuple(roots), tuple(excludes or [])) in self._results
 
-    def search_many(self, names: list[str], roots: list[Path], excludes: list[Path] | None = None) -> None:
+    def search_many(self, names: list[str], roots: list[Path], excludes: list[Path] | PathExclusions | None = None) -> None:
         scope = (tuple(roots), tuple(excludes or []))
         pending = list(dict.fromkeys(name for name in names if (name, *scope) not in self._results))
         batches: list[list[str]] = []
@@ -70,10 +70,10 @@ class RgModuleSearch:
             for name in batch:
                 self._results[(name, *scope)] = sorted(hits[name].values(), key=lambda p: (len(p.parts), str(p)))
 
-    def search_all(self, module_name: str, roots: list[Path], excludes: list[Path] | None = None) -> list[Path]:
+    def search_all(self, module_name: str, roots: list[Path], excludes: list[Path] | PathExclusions | None = None) -> list[Path]:
         self.search_many([module_name], roots, excludes)
         return self._results[module_name, tuple(roots), tuple(excludes or [])]
 
-    def search(self, module_name: str, roots: list[Path], excludes: list[Path] | None = None) -> Path | None:
+    def search(self, module_name: str, roots: list[Path], excludes: list[Path] | PathExclusions | None = None) -> Path | None:
         hits = self.search_all(module_name, roots, excludes)
         return hits[0] if len(hits) == 1 else None
