@@ -29,12 +29,12 @@
 
 库文件选项的依据见 [Icarus 命令文件格式](https://steveicarus.github.io/iverilog/usage/command_files.html)和 [Verilator 参数](https://verilator.org/guide/latest/exe_verilator.html)。保留库选项不保证下游工具对所有重名设计均无警告。
 
-## 按目录输出
+## 精简器件库
 
-使用 `--libs-as-dirs` 开启库目录输出：
+使用 `--compact-libs` 精简器件库清单。符合条件的器件不再逐文件列出，改为按库整体搜索；输出采用 `-y` 和 `+libext+`：
 
 ```sh
-filelist-fix -s rtl models -t top -p pre.f -o out.f --libs-as-dirs
+filelist-fix -s rtl models -t top -p pre.f -o out.f --compact-libs
 ```
 
 符合条件的同目录库文件合并为一条目录记录，扩展名统一列出：

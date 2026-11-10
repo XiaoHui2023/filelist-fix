@@ -55,7 +55,7 @@ def verify(oracle: Path) -> dict:
                 out = work / 'out.f'
                 cp = subprocess.run([sys.executable, str(ROOT / 'src'), '-s', str(work), '-t', 'top',
                                      '-p', str(pre), '-o', str(out), '--save', str(work / 'cache.db'),
-                                     '--libs-as-dirs'], env=env, capture_output=True, timeout=20)
+                                     '--compact-libs'], env=env, capture_output=True, timeout=20)
                 assert cp.returncode == 0, cp.stderr
                 result = compile_list(out)
                 assert result == expected, (result, expected, out.read_text())

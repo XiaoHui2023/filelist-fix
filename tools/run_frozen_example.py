@@ -283,7 +283,7 @@ def verify(executable: Path) -> dict:
         (cells / 'top.sv').write_text('module top;\n' + ''.join(name + ' u' + str(i) + '();\n' for i, name in enumerate(names)) + 'endmodule\n')
         (cells / 'pre.f').write_text(''.join('-v "models space/' + name + '.v"\n' for name in names))
         args = ['-s', str(cells), '-t', 'top', '-p', str(cells / 'pre.f'), '-o', str(cells / 'out.f'),
-                '--save', str(cells / 'cache.db'), '--libs-as-dirs']
+                '--save', str(cells / 'cache.db'), '--compact-libs']
         for _ in range(2):
             run(args)
             assert (cells / 'out.f').read_text().splitlines() == ['+libext+.v', '-y "models space"', 'top.sv']

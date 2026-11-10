@@ -109,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
-        '--libs-as-dirs', dest='library_directories', action='store_true',
-        help='Emit eligible library cells using -y directories and +libext+; retain unsafe files as -v.',
+        '--compact-libs', dest='library_directories', action='store_true',
+        help='Compact device libraries into searchable groups (-y/+libext+); retain ineligible files as -v.',
     )
     return p
