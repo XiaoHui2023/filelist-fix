@@ -29,7 +29,8 @@ def resolve_join_continued_lines(cb: JoinContinuedLinesAPI) -> None:
 
 @InspectLibrarySourceAPI.register
 def resolve_library_source(cb: InspectLibrarySourceAPI) -> None:
-    cb.definitions, cb.cell_definitions, cb.directory_safe, cb.reason = inspect_library_source(cb.source_text)
+    (cb.definitions, cb.cell_definitions, cb.directory_safe, cb.reason,
+     cb.compiler_context, cb.library_features) = inspect_library_source(cb.source_text)
 
 
 @MaskPreprocessorCommentsAPI.register

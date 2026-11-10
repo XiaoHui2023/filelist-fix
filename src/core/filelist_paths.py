@@ -34,3 +34,9 @@ def format_incdir_line(inc_resolved: Path, output_file: Path, *, absolute: bool)
     if " " in disp or disp.startswith("+"):
         return f'+incdir+"{disp}"'
     return f"+incdir+{disp}"
+
+
+def format_source_line(source_file: Path, output_file: Path, *, absolute: bool) -> str:
+    """Quote source paths whose whitespace would split a filelist argument."""
+    listed = format_listed_path(source_file, output_file, absolute=absolute)
+    return '"' + listed + '"' if any(c.isspace() for c in listed) else listed

@@ -4,6 +4,10 @@
 
 | 修改项 | 对应特性 | 当前行为 |
 | --- | --- | --- |
+| 器件库特征按 OR 识别 | F-LIBRARY-DIRECTORIES | celldefine、时序模型、UDP、门开关原语、模型属性、电源网线或强度任一命中即记为候选，预处理不确定不再抹掉识别结果 |
+| 识别与目录转换分层 | F-LIBRARY-DIRECTORIES、F-CLOSURE | 输出层精简候选，不放宽普通重名检查；无关邻居与无冲突交错不再否决整个目录 |
+| 保留共享编译环境与文件级声明 | F-ORDER、F-OUTPUT | 不能安全惰性读取时保留原输入，并记录识别、转换数量与原因 |
+| 保留源码路径的空白引用 | F-OUTPUT、F-PRELUDE | 前导和自动收集的普通源码路径使用统一引用，避免精简回退后被编译器拆成多个参数 |
 | 规范库目录与扩展名输入 | F-PRELUDE、F-LIBRARY | 接受 `-y dir +libext+ .v` 并写成独立的规范行，修复尾部选项丢失与后缀空格误读 |
 | 器件库整体精简开关统一为 `--compact-libs`（原 `--library-directories` / `--libs-as-dirs`） | F-LIBRARY-DIRECTORIES | 适用库文件按目录合并，不适用者保留 `-v`；默认逐文件行为保留 |
 | 区分库归属和目录转换资格 | F-LIBRARY-DIRECTORIES、F-CLOSURE | 依据显式来源或完整 `celldefine`，检查命名、相邻文件、上下文及绑定；`specify` 不作为充分条件 |

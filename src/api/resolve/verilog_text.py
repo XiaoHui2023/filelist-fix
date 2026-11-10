@@ -20,6 +20,8 @@ class InspectLibrarySourceAPI(BaseAPI):
     cell_definitions: list[str] = Field(default_factory=list, description="Units explicitly enclosed by celldefine")
     directory_safe: bool = Field(default=False, description="Self-contained single-unit library candidate")
     reason: str = Field(default="", description="Reason directory conversion is unsafe")
+    compiler_context: bool = Field(default=False, description="Shared compilation directives or declarations")
+    library_features: list[str] = Field(default_factory=list, description="Any source-local library model signals")
 
 
 class MaskPreprocessorCommentsAPI(BaseAPI):

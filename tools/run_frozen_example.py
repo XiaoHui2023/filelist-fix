@@ -300,8 +300,24 @@ def verify(executable: Path) -> dict:
         (models / 'cell0.v').write_text('module cell0; endmodule\nmodule helper; endmodule\n')
         (cells / 'pre.f').write_text(''.join('-v "models space/' + name + '.v"\n' for name in names))
         run(args)
-        assert (cells / 'out.f').read_text().splitlines() == ['-v "models space/' + name + '.v"' for name in names] + ['top.sv']
+        assert (cells / 'out.f').read_text().splitlines() == ['+libext+.v', '-v "models space/cell0.v"', '-y "models space"', 'top.sv']
         checked.append('directory_ineligible_bundle_retains_explicit_library_files')
+        (cells / 'pre.f').write_text('')
+        for name in names:
+            (models / (name + '.v')).write_text('module ' + name + '; specify specparam T=1; endspecify endmodule\n')
+        (models / 'unused.v').write_text('`timescale 1ns/1ps\nmodule unused; missing_child u();\n')
+        for _ in range(2):
+            run(args)
+            assert (cells / 'out.f').read_text().splitlines() == ['+libext+.v', '-y "models space"', 'top.sv']
+        checked.append('unmarked_timing_models_compact_despite_unreferenced_bad_neighbor')
+        top = cells / 'top.sv'
+        top.write_text('`default_nettype none\n' + top.read_text())
+        run(args)
+        lines = (cells / 'out.f').read_text().splitlines()
+        assert all('"models space/' + name + '.v"' in lines for name in names)
+        assert not any(line.startswith('-y') for line in lines)
+        checked.append('recognized_models_keep_eager_quoted_sources_with_shared_compiler_state')
+
     return {"executable": executable.name, "sha256": sha(executable), "features": checked,
             "seconds": round(time.monotonic() - started, 3), "independent_cwd": True,
             "empty_path": True, "source_imports_disabled": True, "stress_samples": stress_samples}

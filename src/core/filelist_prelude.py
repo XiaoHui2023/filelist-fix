@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from core.bin_resolve import path_stat_sig
-from core.filelist_paths import format_incdir_line, format_listed_path
+from core.filelist_paths import format_incdir_line, format_listed_path, format_source_line
 from core.hdl_extensions import HD_SOURCE_EXTENSIONS
 from core.path_logical import logical_abs
 
@@ -165,9 +165,9 @@ class PreludeOutcome:
             return
         self._source_roles[identity] = kind
         self.entries.append(PreludeEntry(kind, len(self.head_lines), path=path))
-        listed = format_listed_path(path, output_path, absolute=absolute)
+        listed = format_source_line(path, output_path, absolute=absolute)
         if library:
-            listed = '-v ' + ('"' + listed + '"' if any(c.isspace() for c in listed) else listed)
+            listed = '-v ' + listed
         self.head_lines.append(listed)
 
 
@@ -291,7 +291,7 @@ def _consume_one_filelist(
 
         if cand.exists():
             outcome.head_lines.append(
-                format_listed_path(cand, output_path, absolute=path_absolute)
+                format_source_line(cand, output_path, absolute=path_absolute)
             )
             continue
 

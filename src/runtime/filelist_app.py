@@ -28,7 +28,7 @@ from core.dep_order import (add_macro_prerequisites, add_macro_state_prerequisit
 from core.fd_search import FdModuleSearch
 from core.hdl_extensions import HD_SOURCE_EXTENSIONS
 from core.library_directories import LibraryDirectoryPlan
-from core.filelist_paths import format_incdir_line, format_listed_path
+from core.filelist_paths import format_incdir_line, format_source_line
 from core.filelist_prelude import PreludeOutcome, load_prelude_files_with_signature
 from core.path_logical import logical_abs
 from core.path_exclude import PathExclusions, path_is_excluded
@@ -252,7 +252,7 @@ class FilelistApplication:
             if (not hp.is_file() or path_is_excluded(hp, self._exclude_paths) or not source_allowed
                     or hp.resolve() in self._ctx.session_state.library_sources
                     or (self._library_plan is not None and
-                        (hp.parent.resolve() in self._library_plan.directories or self._library_plan.is_cell(hp)))):
+                        hp.parent.resolve() in self._library_plan.directories)):
                 self._save.delete_module_hint(mod)
             else:
                 rec = self._save.get_valid(hp)
@@ -351,7 +351,7 @@ class FilelistApplication:
         rows: list[tuple[str, Path | None]] = []
         def append_source(path: Path) -> None:
             rows.extend((line, None) for line in rb.state.incdir_lines_before.get(path, ()))
-            rows.append((format_listed_path(path, self._output, absolute=self._path_absolute), path))
+            rows.append((format_source_line(path, self._output, absolute=self._path_absolute), path))
 
         for index, h in enumerate(rb.head_lines):
             for dependency in rb.prelude_dependencies.get(index, ()):
@@ -442,8 +442,7 @@ class FilelistApplication:
                 self._restore_discovered_incdirs(
                     st, hit, [p for p in st.incdirs if p not in before_incdirs],
                 )
-                is_library = (entry.kind == 'library' or
-                              (self._library_plan is not None and self._library_plan.is_cell(hit)))
+                is_library = entry.kind == 'library'
                 if is_library:
                     st.library_sources.add(hit.resolve())
                 if not self._register_defined_modules(ctx, st, hit, defs,
@@ -544,8 +543,6 @@ class FilelistApplication:
                         )
                     continue
                 hit = st.canonical_source_path(hit)
-                if self._library_plan is not None and self._library_plan.is_cell(hit):
-                    st.library_sources.add(hit.resolve())
                 if log is not None and log.isEnabledFor(logging.DEBUG):
                     log.debug("module %r -> %s", mod, hit)
 
