@@ -31,10 +31,10 @@
 
 ## 按目录输出
 
-使用 `--library-directories` 开启库目录输出：
+使用 `--libs-as-dirs` 开启库目录输出：
 
 ```sh
-filelist-fix -s rtl models -t top -p pre.f -o out.f --library-directories
+filelist-fix -s rtl models -t top -p pre.f -o out.f --libs-as-dirs
 ```
 
 符合条件的同目录库文件合并为一条目录记录，扩展名统一列出：

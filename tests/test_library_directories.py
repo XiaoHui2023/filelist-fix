@@ -12,7 +12,7 @@ def run(work, *, mode=True, expected=0, tops='top', extra=()):
     args = [sys.executable, str(ROOT / 'src'), '-s', str(work), '-t', tops,
             '-p', str(work / 'pre.f'), '-o', str(work / 'out.f'), '--save', str(work / 'cache.db')]
     if mode:
-        args.append('--library-directories')
+        args.append('--libs-as-dirs')
     args.extend(map(str, extra))
     cp = subprocess.run(args, capture_output=True, text=True, encoding='utf-8',
                         env={**os.environ, 'PYTHONUTF8': '1', 'PYTHONIOENCODING': 'utf-8'}, timeout=20)

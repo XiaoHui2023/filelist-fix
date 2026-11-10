@@ -12,7 +12,7 @@
 | `--exclude` | `-x` | 多个路径 |  |  | 排除 source 内的目录 |
 | `--top` | `-t` | 多个模块名 | ✓ |  |  |
 | `--prelude` | `-p` | 多个文件路径 |  |  | 置于 output 前的 filelist 文件 |
-| `--library-directories` |  | 开关 |  | 关闭 | 将符合条件的库文件合并为 `-y` 目录与 `+libext+`，不适用文件保留 `-v` |
+| `--libs-as-dirs` |  | 开关 |  | 关闭 | 将符合条件的库文件合并为 `-y` 目录与 `+libext+`，不适用文件保留 `-v` |
 | `--output` | `-o` | 文件路径 | ✓ |  |  |
 | `--path-style` |  | `relative` / `absolute` |  | `relative` | 相对路径或绝对路径 |
 | `--save` |  | 文件路径 |  |  | 解析结果缓存 |

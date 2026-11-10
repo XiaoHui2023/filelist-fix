@@ -109,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
-        '--library-directories', action='store_true',
+        '--libs-as-dirs', dest='library_directories', action='store_true',
         help='Emit eligible library cells using -y directories and +libext+; retain unsafe files as -v.',
     )
     return p

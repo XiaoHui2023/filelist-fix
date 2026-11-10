@@ -5,7 +5,7 @@
 | 修改项 | 对应特性 | 当前行为 |
 | --- | --- | --- |
 | 规范库目录与扩展名输入 | F-PRELUDE、F-LIBRARY | 接受 `-y dir +libext+ .v` 并写成独立的规范行，修复尾部选项丢失与后缀空格误读 |
-| 增加 `--library-directories` | F-LIBRARY-DIRECTORIES | 适用库文件按目录合并，不适用者保留 `-v`；默认逐文件行为保留 |
+| 器件库目录输出开关改名为 `--libs-as-dirs`（原 `--library-directories`） | F-LIBRARY-DIRECTORIES | 适用库文件按目录合并，不适用者保留 `-v`；默认逐文件行为保留 |
 | 区分库归属和目录转换资格 | F-LIBRARY-DIRECTORIES、F-CLOSURE | 依据显式来源或完整 `celldefine`，检查命名、相邻文件、上下文及绑定；`specify` 不作为充分条件 |
 | 显式目录优先级与缓存角色一致 | F-LIBRARY、F-CACHE | 开关启用时按 `-y` 声明顺序查找，库选择不写入普通源码提示 |
 | 按实际文件身份索引前导输入角色 | F-PRELUDE、F-PERFORMANCE | 同角色去重和混合角色检查不再反复解析全部历史路径 |
