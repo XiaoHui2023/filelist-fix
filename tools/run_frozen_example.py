@@ -317,6 +317,13 @@ def verify(executable: Path) -> dict:
         assert all('"models space/' + name + '.v"' in lines for name in names)
         assert not any(line.startswith('-y') for line in lines)
         checked.append('recognized_models_keep_eager_quoted_sources_with_shared_compiler_state')
+        preserved = (cells / 'out.f').read_bytes()
+        other = cells / 'other'; other.mkdir()
+        (other / 'cell0.v').write_text((models / 'cell0.v').read_text())
+        assert 'Duplicate definition' in run(args, 1).stderr
+        assert (cells / 'out.f').read_bytes() == preserved
+        checked.append('warm_model_candidates_recheck_duplicates_and_preserve_output')
+
 
     return {"executable": executable.name, "sha256": sha(executable), "features": checked,
             "seconds": round(time.monotonic() - started, 3), "independent_cwd": True,

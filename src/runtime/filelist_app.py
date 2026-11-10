@@ -252,7 +252,8 @@ class FilelistApplication:
             if (not hp.is_file() or path_is_excluded(hp, self._exclude_paths) or not source_allowed
                     or hp.resolve() in self._ctx.session_state.library_sources
                     or (self._library_plan is not None and
-                        hp.parent.resolve() in self._library_plan.directories)):
+                        (hp.parent.resolve() in self._library_plan.directories
+                         or self._library_plan.profile(hp).library_features))):
                 self._save.delete_module_hint(mod)
             else:
                 rec = self._save.get_valid(hp)

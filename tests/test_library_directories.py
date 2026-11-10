@@ -301,3 +301,15 @@ def test_existing_extension_order_is_preserved_and_audited(tmp_path, shadow):
     else:
         assert '-y models' in lines
     assert lines[0] == ('+libext+.model' if shadow else '+libext+.model+.v')
+
+
+@pytest.mark.parametrize('marked', [False, True])
+def test_warm_model_hints_do_not_hide_new_duplicate_candidates(tmp_path, marked):
+    fixture(tmp_path, explicit=False, marked=marked)
+    run(tmp_path)
+    preserved = (tmp_path / 'out.f').read_bytes()
+    (tmp_path / 'other').mkdir()
+    text = (tmp_path / 'models/cell0.v').read_text()
+    (tmp_path / 'other/cell0.v').write_text(text)
+    assert 'Duplicate definition' in run(tmp_path, expected=1).stderr
+    assert (tmp_path / 'out.f').read_bytes() == preserved
